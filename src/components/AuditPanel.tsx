@@ -64,6 +64,14 @@ const CORE_GUARDS = [
     status: 'Zero forced redirects, zero repeated popups, zero external libraries',
   },
   {
+    item: 'Button Click Configuration',
+    status: 'Centralized BUTTON_CLICK_CONFIG (per-button URL, enabled flag, new/current tab)',
+  },
+  {
+    item: 'Duplicate Click Guard',
+    status: 'Trusted-click check (isTrusted) + per-button cooldownMs debounce + .is-cooldown',
+  },
+  {
     item: 'Preserved IDs & Tokens',
     status: '#videoThumbnail, #playIcon, #loadingScreen, #btn1-#btn3, {{TITLE}}, {{IMAGE_URL}}, {{CAPTION}}',
   },

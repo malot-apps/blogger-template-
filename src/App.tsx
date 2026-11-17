@@ -12,7 +12,13 @@ import {
 import { AuditPanel } from './components/AuditPanel';
 import { CodeInspector } from './components/CodeInspector';
 import { LivePreview } from './components/LivePreview';
-import { buildSmartAdsBloggerTemplate, TemplateConfig } from './template/bloggerTemplate';
+import {
+  buildSmartAdsBloggerTemplate,
+  ButtonClickSetting,
+  ButtonId,
+  DEFAULT_BUTTON_SETTINGS,
+  TemplateConfig,
+} from './template/bloggerTemplate';
 
 interface SamplePreset {
   id: 'landscape' | 'portrait' | 'square';
@@ -64,6 +70,8 @@ export default function App() {
     caption: SAMPLE_PRESETS[0].caption,
     imageUrl: SAMPLE_PRESETS[0].url,
     videoUrl: '',
+    buttonCooldownMs: 1200,
+    buttons: DEFAULT_BUTTON_SETTINGS,
   });
 
   const [imageMetrics, setImageMetrics] = useState({
@@ -80,6 +88,8 @@ export default function App() {
           caption: '{{CAPTION}}',
           imageUrl: '{{IMAGE_URL}}',
           videoUrl: config.videoUrl,
+          buttonCooldownMs: config.buttonCooldownMs,
+          buttons: config.buttons,
         }
       : config;
 
@@ -118,13 +128,33 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const updateButtonSetting = (buttonId: ButtonId, patch: Partial<ButtonClickSetting>) => {
+    setConfig((prev) => {
+      const currentButtons = prev.buttons || DEFAULT_BUTTON_SETTINGS;
+      return {
+        ...prev,
+        buttons: {
+          ...currentButtons,
+          [buttonId]: {
+            ...currentButtons[buttonId],
+            ...patch,
+          },
+        },
+      };
+    });
+  };
+
   const handleActionTriggered = (source: string) => {
-    setActionNotice(
-      `Action via ${source}: genuine playback handler triggered (click again on failure to inspect repeated-error state).`
-    );
+    if (source.startsWith('#btn')) {
+      setActionNotice(source);
+    } else {
+      setActionNotice(
+        `Action via ${source}: genuine playback handler triggered (click again on failure to inspect repeated-error state).`
+      );
+    }
     window.setTimeout(() => {
       setActionNotice(null);
-    }, 3200);
+    }, 3600);
   };
 
   return (
@@ -378,6 +408,110 @@ export default function App() {
                 HTML
               </span>
             </label>
+          </div>
+
+          <hr className="border-slate-200" />
+
+          {/* Button Click & Ad Link System */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-display text-sm font-bold text-slate-900">Button Click System</h2>
+              <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                {config.buttonCooldownMs ?? 1200}ms guard
+              </span>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-slate-600">Duplicate-Click Cooldown (ms)</span>
+              <input
+                type="number"
+                min={0}
+                max={10000}
+                step={100}
+                value={config.buttonCooldownMs ?? 1200}
+                onChange={(e) =>
+                  setConfig((prev) => ({
+                    ...prev,
+                    buttonCooldownMs: Math.max(0, Number(e.target.value) || 0),
+                  }))
+                }
+                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 font-mono text-xs text-slate-800 focus:outline-none focus:border-blue-600"
+              />
+            </label>
+
+            {(['btn1', 'btn2', 'btn3'] as ButtonId[]).map((btnId) => {
+              const btn = (config.buttons || DEFAULT_BUTTON_SETTINGS)[btnId];
+              return (
+                <div
+                  key={btnId}
+                  className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-bold text-slate-800">
+                      #{btnId} <span className="font-normal text-slate-500">({btn.label})</span>
+                    </div>
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={btn.enabled}
+                        onChange={(e) =>
+                          updateButtonSetting(btnId, { enabled: e.target.checked })
+                        }
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                      />
+                      <span>Link Active</span>
+                    </label>
+                  </div>
+
+                  <input
+                    type="url"
+                    placeholder="https://approved-ad-or-target-url.com"
+                    value={btn.url}
+                    onChange={(e) => updateButtonSetting(btnId, { url: e.target.value })}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-[11px] text-slate-800 focus:outline-none focus:border-blue-600"
+                  />
+
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-[11px] font-medium">
+                      <button
+                        type="button"
+                        onClick={() => updateButtonSetting(btnId, { openInNewTab: true })}
+                        className={`px-2 py-0.5 rounded-md cursor-pointer transition-colors ${
+                          btn.openInNewTab
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        New Tab
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateButtonSetting(btnId, { openInNewTab: false })}
+                        className={`px-2 py-0.5 rounded-md cursor-pointer transition-colors ${
+                          !btn.openInNewTab
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Same Tab
+                      </button>
+                    </div>
+
+                    <label className="inline-flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={btn.triggerPlayback}
+                        onChange={(e) =>
+                          updateButtonSetting(btnId, { triggerPlayback: e.target.checked })
+                        }
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                      />
+                      <span>Play Video</span>
+                    </label>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </aside>
 

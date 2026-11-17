@@ -1,24 +1,72 @@
+export type ButtonId = 'btn1' | 'btn2' | 'btn3';
+
+export interface ButtonClickSetting {
+  label: string;
+  enabled: boolean;
+  url: string;
+  openInNewTab: boolean;
+  triggerPlayback: boolean;
+}
+
 export interface TemplateConfig {
   title: string;
   caption: string;
   imageUrl: string;
   videoUrl: string;
+  buttonCooldownMs?: number;
+  buttons?: Record<ButtonId, ButtonClickSetting>;
+}
+
+export const DEFAULT_BUTTON_SETTINGS: Record<ButtonId, ButtonClickSetting> = {
+  btn1: {
+    label: 'Play Now',
+    enabled: true,
+    url: 'https://cheflobesofficer.com/b1b9djat?key=a45917b862f040650d5da9b0f6ceac52',
+    openInNewTab: true,
+    triggerPlayback: true,
+  },
+  btn2: {
+    label: 'Watch Now',
+    enabled: true,
+    url: 'https://www.effectivecpmnetwork.com/b1b9djat?key=a45917b862f040650d5da9b0f6ceac52',
+    openInNewTab: true,
+    triggerPlayback: false,
+  },
+  btn3: {
+    label: 'Play & Watch',
+    enabled: false,
+    url: '',
+    openInNewTab: true,
+    triggerPlayback: true,
+  },
+};
+
+function escapeJsString(value: string): string {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/<\/script/gi, '<\\/script')
+    .replace(/[\r\n]+/g, '');
 }
 
 /**
  * Generates the complete, Blogger-compatible single-file HTML template with:
  * - Preserved 6-slot Smart Advertisement System (lazy loading, responsive, fallback, CLS-safe)
  * - Preserved auto-sizing thumbnail aspect ratio (--video-ratio) and #btn1/#btn2/#btn3
- * - Professional Bengali CTA texts (heading above player, instruction below Play button,
- *   floating "নিচে Scroll করুন" indicator, friendly Bengali loading & real failure retry/error states)
- * - Bengali typography (Hind Siliguri + Noto Sans Bengali + system fallbacks)
- * - Genuine HTML5 video playback & real error-event retry handling (no fake progress, no popups/redirects)
+ * - Professional Bengali CTA texts, typography, loading & real failure retry/error states
+ * - Configurable JavaScript Button Click System (per-button URLs, tab mode, enable/disable, anti-duplicate cooldown)
+ * - Genuine HTML5 video playback & real error-event retry handling (no automatic popups or forced redirects)
  */
 export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
   const safeTitle = config.title || '{{TITLE}}';
   const safeCaption = config.caption || '{{CAPTION}}';
   const safeImageUrl = config.imageUrl || '{{IMAGE_URL}}';
   const safeVideoUrl = config.videoUrl || '';
+  const cooldownMs =
+    typeof config.buttonCooldownMs === 'number' && config.buttonCooldownMs >= 0
+      ? Math.round(config.buttonCooldownMs)
+      : 1200;
+  const buttons = config.buttons || DEFAULT_BUTTON_SETTINGS;
 
   return `<!DOCTYPE html>
 <html lang="bn">
@@ -457,11 +505,23 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       font-weight: bold;
       transition: all 0.3s;
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
 
     button:hover {
       transform: translateY(-2px);
       box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button.is-cooldown {
+      opacity: 0.82;
+      transform: scale(0.98);
+      pointer-events: none;
     }
 
     .scroll-indicator-wrap {
@@ -846,9 +906,40 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
   </aside>
 
   <script>
-    // Configuration
-    const CUSTOM_THUMBNAIL_URL = "${safeImageUrl}";
-    const CUSTOM_VIDEO_URL = "${safeVideoUrl}";
+    // =========================================================================
+    // 1. MEDIA & THUMBNAIL CONFIGURATION
+    // =========================================================================
+    const CUSTOM_THUMBNAIL_URL = "${escapeJsString(safeImageUrl)}";
+    const CUSTOM_VIDEO_URL = "${escapeJsString(safeVideoUrl)}";
+
+    // =========================================================================
+    // 2. BUTTON CLICK & AD LINK CONFIGURATION
+    // Configure individual button URLs, enable/disable actions, tab behavior,
+    // and duplicate-click protection in one place.
+    // =========================================================================
+    const BUTTON_CLICK_CONFIG = {
+      cooldownMs: ${cooldownMs}, // Prevents accidental double-clicks & duplicate events
+      buttons: {
+        btn1: {
+          enabled: ${buttons.btn1.enabled},
+          url: "${escapeJsString(buttons.btn1.url)}",
+          openInNewTab: ${buttons.btn1.openInNewTab},    // true = new tab, false = current tab
+          triggerPlayback: ${buttons.btn1.triggerPlayback}  // true = also run video playback
+        },
+        btn2: {
+          enabled: ${buttons.btn2.enabled},
+          url: "${escapeJsString(buttons.btn2.url)}",
+          openInNewTab: ${buttons.btn2.openInNewTab},
+          triggerPlayback: ${buttons.btn2.triggerPlayback}
+        },
+        btn3: {
+          enabled: ${buttons.btn3.enabled},
+          url: "${escapeJsString(buttons.btn3.url)}",
+          openInNewTab: ${buttons.btn3.openInNewTab},
+          triggerPlayback: ${buttons.btn3.triggerPlayback}
+        }
+      }
+    };
 
     // Core Player Elements
     const videoContainer = document.getElementById('videoContainer');
@@ -996,9 +1087,82 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       }
     }
 
-    document.querySelectorAll('.controls button').forEach(function (button) {
-      button.addEventListener('click', handleAction);
-    });
+    // =========================================================================
+    // 3. USER-INITIATED BUTTON CLICK SYSTEM (NO AUTO POPUPS OR REDIRECTS)
+    // =========================================================================
+    const buttonLastClickAt = {};
+
+    function isValidDestinationUrl(rawUrl) {
+      if (typeof rawUrl !== 'string') return false;
+      const trimmed = rawUrl.trim();
+      return /^https?:\/\//i.test(trimmed);
+    }
+
+    function applyButtonCooldown(buttonEl, buttonId, cooldownMs) {
+      buttonLastClickAt[buttonId] = Date.now();
+      if (!buttonEl || cooldownMs <= 0) return;
+
+      buttonEl.classList.add('is-cooldown');
+      buttonEl.setAttribute('aria-busy', 'true');
+      setTimeout(function () {
+        buttonEl.classList.remove('is-cooldown');
+        buttonEl.removeAttribute('aria-busy');
+      }, cooldownMs);
+    }
+
+    function handleConfiguredButtonClick(buttonId, event) {
+      // Only respond to genuine user-initiated clicks
+      if (!event || event.isTrusted === false) return;
+
+      const buttonEl = document.getElementById(buttonId);
+      const btnSettings = BUTTON_CLICK_CONFIG.buttons[buttonId];
+      const cooldownMs = Math.max(0, Number(BUTTON_CLICK_CONFIG.cooldownMs) || 0);
+      const now = Date.now();
+      const lastClick = buttonLastClickAt[buttonId] || 0;
+
+      // Prevent accidental duplicate click events
+      if (cooldownMs > 0 && now - lastClick < cooldownMs) {
+        return;
+      }
+      applyButtonCooldown(buttonEl, buttonId, cooldownMs);
+
+      const hasActiveUrl =
+        Boolean(btnSettings && btnSettings.enabled) &&
+        isValidDestinationUrl(btnSettings.url);
+
+      if (hasActiveUrl) {
+        const destinationUrl = btnSettings.url.trim();
+        if (btnSettings.openInNewTab) {
+          // Single intentional new-tab open synchronously within the click handler
+          window.open(destinationUrl, '_blank', 'noopener,noreferrer');
+          if (btnSettings.triggerPlayback) {
+            handleAction();
+          }
+          return;
+        } else {
+          // Intentional navigation in the current tab when configured
+          window.location.assign(destinationUrl);
+          return;
+        }
+      }
+
+      // Preserve original playback functionality when URL action is disabled or empty
+      if (!btnSettings || btnSettings.triggerPlayback !== false) {
+        handleAction();
+      }
+    }
+
+    function initButtonClickSystem() {
+      Object.keys(BUTTON_CLICK_CONFIG.buttons).forEach(function (buttonId) {
+        const buttonEl = document.getElementById(buttonId);
+        if (!buttonEl) return;
+        buttonEl.addEventListener('click', function (event) {
+          handleConfiguredButtonClick(buttonId, event);
+        });
+      });
+    }
+
+    initButtonClickSystem();
 
     if (playIcon) {
       playIcon.addEventListener('click', function (e) {

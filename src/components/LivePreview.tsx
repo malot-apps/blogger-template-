@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowDown, Play, Tv } from 'lucide-react';
-import { TemplateConfig } from '../template/bloggerTemplate';
+import {
+  ButtonId,
+  DEFAULT_BUTTON_SETTINGS,
+  TemplateConfig,
+} from '../template/bloggerTemplate';
 
 interface LivePreviewProps {
   config: TemplateConfig;
@@ -82,9 +86,24 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [failureCount, setFailureCount] = useState<number>(0);
   const [imgError, setImgError] = useState<boolean>(false);
+  const [cooldownButtons, setCooldownButtons] = useState<Record<ButtonId, boolean>>({
+    btn1: false,
+    btn2: false,
+    btn3: false,
+  });
   const imgRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const loadingTimerRef = useRef<number | null>(null);
+  const lastClickAtRef = useRef<Record<ButtonId, number>>({
+    btn1: 0,
+    btn2: 0,
+    btn3: 0,
+  });
+  const cooldownTimersRef = useRef<Record<ButtonId, number | null>>({
+    btn1: null,
+    btn2: null,
+    btn3: null,
+  });
 
   useEffect(() => {
     setImgError(false);
@@ -101,6 +120,10 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
       if (loadingTimerRef.current) {
         window.clearTimeout(loadingTimerRef.current);
       }
+      (['btn1', 'btn2', 'btn3'] as ButtonId[]).forEach((id) => {
+        const timer = cooldownTimersRef.current[id];
+        if (timer) window.clearTimeout(timer);
+      });
     };
   }, []);
 
@@ -155,6 +178,50 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
           setIsLoading(false);
           setFailureCount((prev) => prev + 1);
         });
+    }
+  };
+
+  const handleControlButtonClick = (buttonId: ButtonId, e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!e.nativeEvent.isTrusted) return;
+
+    const cooldownMs = Math.max(0, config.buttonCooldownMs ?? 1200);
+    const now = Date.now();
+    const lastAt = lastClickAtRef.current[buttonId] || 0;
+    if (cooldownMs > 0 && now - lastAt < cooldownMs) {
+      return;
+    }
+
+    lastClickAtRef.current[buttonId] = now;
+    if (cooldownMs > 0) {
+      setCooldownButtons((prev) => ({ ...prev, [buttonId]: true }));
+      const existing = cooldownTimersRef.current[buttonId];
+      if (existing) window.clearTimeout(existing);
+      cooldownTimersRef.current[buttonId] = window.setTimeout(() => {
+        setCooldownButtons((prev) => ({ ...prev, [buttonId]: false }));
+      }, cooldownMs);
+    }
+
+    const buttons = config.buttons || DEFAULT_BUTTON_SETTINGS;
+    const btnCfg = buttons[buttonId];
+    const hasValidUrl = Boolean(btnCfg.enabled && /^https?:\/\//i.test(btnCfg.url.trim()));
+
+    if (hasValidUrl) {
+      const modeText = btnCfg.openInNewTab ? 'New Tab' : 'Current Tab';
+      const playbackSuffix =
+        btnCfg.openInNewTab && btnCfg.triggerPlayback ? ' + Video Playback' : '';
+      onActionTriggered(
+        `#${buttonId} (${btnCfg.label}) -> Simulated ${modeText} link (${btnCfg.url.trim()})${playbackSuffix}`
+      );
+      if (btnCfg.openInNewTab && btnCfg.triggerPlayback) {
+        triggerPlayback(`#${buttonId} (${btnCfg.label})`);
+      }
+      return;
+    }
+
+    if (btnCfg.triggerPlayback) {
+      triggerPlayback(`#${buttonId} (${btnCfg.label})`);
+    } else {
+      onActionTriggered(`#${buttonId} (${btnCfg.label}) -> Link disabled & playback unchecked`);
     }
   };
 
@@ -368,22 +435,28 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
           <div className="flex justify-center flex-wrap gap-3.5 my-4">
             <button
               type="button"
-              onClick={() => triggerPlayback('#btn1 (Play Now)')}
-              className="px-6 py-3 rounded-full bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white font-bold text-base shadow-[0_4px_8px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.15)] transition-all cursor-pointer whitespace-nowrap"
+              onClick={(e) => handleControlButtonClick('btn1', e)}
+              className={`px-6 py-3 rounded-full bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white font-bold text-base shadow-[0_4px_8px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.15)] transition-all cursor-pointer whitespace-nowrap touch-manipulation ${
+                cooldownButtons.btn1 ? 'opacity-80 scale-[0.98] pointer-events-none' : ''
+              }`}
             >
               Play Now
             </button>
             <button
               type="button"
-              onClick={() => triggerPlayback('#btn2 (Watch Now)')}
-              className="px-6 py-3 rounded-full bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white font-bold text-base shadow-[0_4px_8px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.15)] transition-all cursor-pointer whitespace-nowrap"
+              onClick={(e) => handleControlButtonClick('btn2', e)}
+              className={`px-6 py-3 rounded-full bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white font-bold text-base shadow-[0_4px_8px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.15)] transition-all cursor-pointer whitespace-nowrap touch-manipulation ${
+                cooldownButtons.btn2 ? 'opacity-80 scale-[0.98] pointer-events-none' : ''
+              }`}
             >
               Watch Now
             </button>
             <button
               type="button"
-              onClick={() => triggerPlayback('#btn3 (Play & Watch)')}
-              className="px-6 py-3 rounded-full bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white font-bold text-base shadow-[0_4px_8px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.15)] transition-all cursor-pointer whitespace-nowrap"
+              onClick={(e) => handleControlButtonClick('btn3', e)}
+              className={`px-6 py-3 rounded-full bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white font-bold text-base shadow-[0_4px_8px_rgba(0,0,0,0.1)] hover:-translate-y-0.5 hover:shadow-[0_6px_12px_rgba(0,0,0,0.15)] transition-all cursor-pointer whitespace-nowrap touch-manipulation ${
+                cooldownButtons.btn3 ? 'opacity-80 scale-[0.98] pointer-events-none' : ''
+              }`}
             >
               Play &amp; Watch
             </button>
