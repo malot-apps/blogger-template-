@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+}
+
+@keyframes pulseRing {
+  0% {
+    transform: translate(-50%, -50%) scale(0.92);
+    opacity: 0.75;
+  }
+  70% {
+    transform: translate(-50%, -50%) scale(1.48);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.48);
+    opacity: 0;
+  }
+}
+
+@keyframes liveDotPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.55;
+  }
+}
+
+@keyframes spinnerRotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.preview-play-ring {
+  animation: pulseRing 2.1s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.preview-live-dot {
+  animation: liveDotPulse 1.6s ease-in-out infinite;
+}
+
+.preview-spinner {
+  animation: spinnerRotate 0.85s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-play-ring,
+  .preview-live-dot {
+    animation: none;
+  }
+}
