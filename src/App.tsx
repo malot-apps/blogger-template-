@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Copy, Loader2, Monitor, RotateCcw, ShieldAlert, Smartphone } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Loader2,
+  Monitor,
+  RotateCcw,
+  ShieldAlert,
+  Smartphone,
+} from 'lucide-react';
 import { AuditPanel } from './components/AuditPanel';
 import { CodeInspector } from './components/CodeInspector';
 import { LivePreview } from './components/LivePreview';
@@ -46,6 +55,7 @@ export default function App() {
   const [exportRawPlaceholders, setExportRawPlaceholders] = useState<boolean>(true);
   const [forceLoading, setForceLoading] = useState<boolean>(false);
   const [simulateFallback, setSimulateFallback] = useState<boolean>(false);
+  const [simulatePlaybackError, setSimulatePlaybackError] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
@@ -53,6 +63,7 @@ export default function App() {
     title: SAMPLE_PRESETS[0].title,
     caption: SAMPLE_PRESETS[0].caption,
     imageUrl: SAMPLE_PRESETS[0].url,
+    videoUrl: '',
   });
 
   const [imageMetrics, setImageMetrics] = useState({
@@ -68,6 +79,7 @@ export default function App() {
           title: '{{TITLE}}',
           caption: '{{CAPTION}}',
           imageUrl: '{{IMAGE_URL}}',
+          videoUrl: config.videoUrl,
         }
       : config;
 
@@ -76,11 +88,12 @@ export default function App() {
 
   const applyPreset = (preset: SamplePreset) => {
     setSelectedPreset(preset.id);
-    setConfig({
+    setConfig((prev) => ({
+      ...prev,
       imageUrl: preset.url,
       title: preset.title,
       caption: preset.caption,
-    });
+    }));
   };
 
   const handleCopyCode = async () => {
@@ -98,7 +111,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'blogger-smart-ads-template.html';
+    link.download = 'blogger-bengali-cta-player-template.html';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -107,11 +120,11 @@ export default function App() {
 
   const handleActionTriggered = (source: string) => {
     setActionNotice(
-      `Playback loading started via ${source} (non-intrusive mode: zero redirects or popups).`
+      `Action via ${source}: genuine playback handler triggered (click again on failure to inspect repeated-error state).`
     );
     window.setTimeout(() => {
       setActionNotice(null);
-    }, 3000);
+    }, 3200);
   };
 
   return (
@@ -220,7 +233,7 @@ export default function App() {
 
           <hr className="border-slate-200" />
 
-          {/* Viewport & Smart Ad State */}
+          {/* Viewport & State Controls */}
           <div className="space-y-3">
             <h2 className="font-display text-sm font-bold text-slate-900">
               Viewport &amp; State Tests
@@ -262,7 +275,22 @@ export default function App() {
               }`}
             >
               <Loader2 className={`w-3.5 h-3.5 ${forceLoading ? 'animate-spin' : ''}`} />
-              <span>{forceLoading ? 'Hide Loading Overlay' : 'Inspect Loading Overlay'}</span>
+              <span>{forceLoading ? 'Hide Bengali Loading' : 'Inspect Bengali Loading'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSimulatePlaybackError((prev) => !prev)}
+              className={`w-full min-h-[40px] px-3 py-2 rounded-xl border text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+                simulatePlaybackError
+                  ? 'border-rose-300 bg-rose-50 text-rose-800'
+                  : 'border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>
+                {simulatePlaybackError ? 'Error Test Active (Click Play)' : 'Enable Error Test'}
+              </span>
             </button>
 
             <button
@@ -325,6 +353,17 @@ export default function App() {
               />
             </label>
 
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-slate-600">Video Source URL (MP4/WebM)</span>
+              <input
+                type="text"
+                placeholder="https://example.com/video.mp4"
+                value={config.videoUrl}
+                onChange={(e) => setConfig((prev) => ({ ...prev, videoUrl: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 font-mono text-[11px] text-slate-800 focus:outline-none focus:border-blue-600"
+              />
+            </label>
+
             <label className="flex items-start gap-2.5 pt-1 cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -363,6 +402,7 @@ export default function App() {
               viewport={viewport}
               forceLoading={forceLoading}
               simulateFallback={simulateFallback}
+              simulatePlaybackError={simulatePlaybackError}
               onImageMetrics={setImageMetrics}
               onActionTriggered={handleActionTriggered}
             />

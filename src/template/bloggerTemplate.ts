@@ -2,30 +2,34 @@ export interface TemplateConfig {
   title: string;
   caption: string;
   imageUrl: string;
+  videoUrl: string;
 }
 
 /**
  * Generates the complete, Blogger-compatible single-file HTML template with:
- * 1. Exact 6 Ad Placements (Top Banner, Native below thumbnail, Player Bottom,
- *    In-Content middle of description, Related Content between related videos, Bottom Banner)
- * 2. Smart Ad System (IntersectionObserver Lazy Loading, Responsive sizing,
- *    Ad Fallback on load error/block, CLS-Safe reserved slots)
- * 3. Premium UI Animations (Glowing pulse-ring Play Button, Glassmorphism Loading
- *    Spinner + Gradient Progress Bar, Smooth Scrolling)
- * - Zero external libraries, zero forced redirects, zero repeated popups.
+ * - Preserved 6-slot Smart Advertisement System (lazy loading, responsive, fallback, CLS-safe)
+ * - Preserved auto-sizing thumbnail aspect ratio (--video-ratio) and #btn1/#btn2/#btn3
+ * - Professional Bengali CTA texts (heading above player, instruction below Play button,
+ *   floating "নিচে Scroll করুন" indicator, friendly Bengali loading & real failure retry/error states)
+ * - Bengali typography (Hind Siliguri + Noto Sans Bengali + system fallbacks)
+ * - Genuine HTML5 video playback & real error-event retry handling (no fake progress, no popups/redirects)
  */
 export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
   const safeTitle = config.title || '{{TITLE}}';
   const safeCaption = config.caption || '{{CAPTION}}';
   const safeImageUrl = config.imageUrl || '{{IMAGE_URL}}';
+  const safeVideoUrl = config.videoUrl || '';
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="bn">
 <head>
   <script src="https://pl30161573.effectivecpmnetwork.com/bc/17/d1/bc17d177bcada949929a7511850a6cf0.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${safeTitle}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after {
       box-sizing: border-box;
@@ -36,13 +40,15 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     }
 
     body {
-      font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: 'Hind Siliguri', 'Noto Sans Bengali', 'SolaimanLipi', 'Kalpurush', Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       max-width: 800px;
       margin: 0 auto;
       padding: 20px;
       color: #1e293b;
       background-color: #ffffff;
-      line-height: 1.6;
+      line-height: 1.65;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
     }
 
     /* Blogger Post Thumbnail Separator */
@@ -69,9 +75,7 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
     }
 
-    /* =====================================================
-       CLS-SAFE RESPONSIVE AD SLOTS & FALLBACK SYSTEM
-       ===================================================== */
+    /* CLS-Safe Responsive Ad Slots & Fallback System */
     .ad-slot-wrapper {
       width: 100%;
       margin: 18px auto;
@@ -106,7 +110,6 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       position: relative;
     }
 
-    /* Reserved dimensions prevent Cumulative Layout Shift (CLS) */
     .ad-slot--banner .ad-slot-inner {
       max-width: 728px;
       min-height: 90px;
@@ -143,15 +146,46 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       margin-bottom: 2px;
     }
 
-    /* =====================================================
-       AUTO-SIZING VIDEO PLAYER CONTAINER
-       ===================================================== */
+    /* Bengali CTA Heading Above Player */
+    .bn-player-heading-wrap {
+      text-align: center;
+      margin: 20px auto 12px;
+      animation: bnFadeSlideUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .bn-player-heading {
+      margin: 0;
+      font-size: clamp(1.2rem, 2.8vw, 1.55rem);
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.45;
+    }
+
+    .bn-player-subheading {
+      margin: 4px 0 0;
+      font-size: 14px;
+      font-weight: 500;
+      color: #475569;
+    }
+
+    @keyframes bnFadeSlideUp {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Auto-Sizing Video Player Container */
     .video-container {
       position: relative;
       width: 100%;
       aspect-ratio: var(--video-ratio, 16 / 9);
       height: auto;
-      margin: 20px auto;
+      margin: 12px auto 18px;
       background-color: #000;
       overflow: hidden;
       border-radius: 12px;
@@ -174,44 +208,72 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       height: 100%;
       object-fit: contain;
       display: block;
-      transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
     }
 
     .video-container:hover #videoThumbnail {
       transform: scale(1.025);
     }
 
-    .video-container::after {
-      content: '';
+    .video-container.is-playing #videoThumbnail,
+    .video-container.is-playing .video-scrim,
+    .video-container.is-playing .play-center-group {
+      display: none;
+    }
+
+    .video-scrim {
       position: absolute;
       inset: 0;
-      background: radial-gradient(circle at center, rgba(0, 0, 0, 0.25) 0%, rgba(0, 0, 0, 0.05) 55%, rgba(0, 0, 0, 0.28) 100%);
+      background: radial-gradient(circle at center, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.08) 55%, rgba(0, 0, 0, 0.36) 100%);
       pointer-events: none;
       z-index: 2;
     }
 
-    /* =====================================================
-       PREMIUM ANIMATED PLAY BUTTON
-       ===================================================== */
-    .play-icon {
+    #videoPlayer {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      background: #000;
+      z-index: 20;
+    }
+
+    .video-container.is-playing #videoPlayer {
+      display: block;
+    }
+
+    /* Centered Play Button + Bengali Instruction Group */
+    .play-center-group {
       position: absolute;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%);
+      transform: translate(-50%, -46%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      z-index: 10;
+      width: min(90%, 340px);
+      pointer-events: none;
+    }
+
+    .play-icon {
+      position: relative;
       width: 78px;
       height: 78px;
       border-radius: 50%;
-      background: linear-gradient(135deg, rgba(110, 142, 251, 0.95), rgba(167, 119, 227, 0.95));
-      border: 2px solid rgba(255, 255, 255, 0.92);
+      background: linear-gradient(135deg, rgba(110, 142, 251, 0.96), rgba(167, 119, 227, 0.96));
+      border: 2px solid rgba(255, 255, 255, 0.94);
       color: #ffffff;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      z-index: 10;
+      pointer-events: auto;
       box-shadow:
-        0 0 26px rgba(110, 142, 251, 0.65),
-        0 0 48px rgba(167, 119, 227, 0.4),
+        0 0 26px rgba(110, 142, 251, 0.7),
+        0 0 48px rgba(167, 119, 227, 0.45),
         0 10px 24px rgba(0, 0, 0, 0.38);
       transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s ease, opacity 0.25s ease;
     }
@@ -222,8 +284,8 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       position: absolute;
       inset: -10px;
       border-radius: 50%;
-      border: 2px solid rgba(255, 255, 255, 0.72);
-      box-shadow: 0 0 20px rgba(110, 142, 251, 0.55);
+      border: 2px solid rgba(255, 255, 255, 0.75);
+      box-shadow: 0 0 20px rgba(110, 142, 251, 0.58);
       animation: playPulseRing 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
       pointer-events: none;
     }
@@ -234,15 +296,15 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
 
     .video-container:hover .play-icon,
     .play-icon:hover {
-      transform: translate(-50%, -50%) scale(1.1);
+      transform: scale(1.1);
       box-shadow:
-        0 0 34px rgba(110, 142, 251, 0.85),
-        0 0 64px rgba(167, 119, 227, 0.55),
+        0 0 34px rgba(110, 142, 251, 0.88),
+        0 0 64px rgba(167, 119, 227, 0.58),
         0 14px 32px rgba(0, 0, 0, 0.45);
     }
 
     .play-icon:active {
-      transform: translate(-50%, -50%) scale(0.97);
+      transform: scale(0.97);
     }
 
     .play-icon:focus-visible {
@@ -261,7 +323,30 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     .play-icon.loading {
       opacity: 0;
       pointer-events: none;
-      transform: translate(-50%, -50%) scale(0.82);
+      transform: scale(0.84);
+    }
+
+    /* Short Bengali instruction directly below Play button */
+    .bn-play-hint {
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.72);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      line-height: 1.4;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+      animation: bnFadeSlideUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+      transition: opacity 0.2s ease;
+    }
+
+    .play-center-group.is-hidden {
+      opacity: 0;
+      pointer-events: none;
     }
 
     @keyframes playPulseRing {
@@ -270,16 +355,15 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       100% { transform: scale(1.52); opacity: 0; }
     }
 
-    /* =====================================================
-       SMART GLASSMORPHISM LOADING ANIMATION
-       ===================================================== */
-    .loading-screen {
+    /* Friendly Bengali Loading & Error / Retry Overlay */
+    .loading-screen,
+    .playback-error-screen {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
       padding: 20px;
-      background: rgba(15, 23, 42, 0.58);
+      background: rgba(15, 23, 42, 0.68);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
       display: none;
@@ -288,9 +372,9 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       z-index: 15;
     }
 
-    .loading-card {
-      width: min(320px, 92%);
-      padding: 24px 20px;
+    .overlay-glass-card {
+      width: min(350px, 94%);
+      padding: 22px 20px;
       border-radius: 16px;
       background: rgba(255, 255, 255, 0.12);
       border: 1px solid rgba(255, 255, 255, 0.24);
@@ -299,74 +383,65 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       flex-direction: column;
       align-items: center;
       text-align: center;
-      gap: 12px;
+      gap: 10px;
       color: #ffffff;
+      animation: bnFadeSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
     }
 
     .loading-spinner {
-      width: 48px;
-      height: 48px;
+      width: 46px;
+      height: 46px;
       border-radius: 50%;
-      background: conic-gradient(from 0deg, #6e8efb, #a777e3, rgba(255, 255, 255, 0.15) 75%);
+      background: conic-gradient(from 0deg, #6e8efb, #a777e3, rgba(255, 255, 255, 0.16) 75%);
       -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
       mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
       animation: spinnerSpin 0.85s linear infinite;
     }
 
-    .loading-title {
-      font-size: 17px;
+    .overlay-title {
+      font-size: 16.5px;
       font-weight: 700;
-      letter-spacing: 0.01em;
       color: #ffffff;
+      line-height: 1.45;
       text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
     }
 
-    .loading-subtitle {
-      font-size: 12.5px;
-      color: rgba(255, 255, 255, 0.84);
-      margin-top: -6px;
+    .overlay-subtitle {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.88);
+      line-height: 1.5;
     }
 
-    .loading-progress-track {
-      width: 100%;
-      height: 6px;
-      background: rgba(255, 255, 255, 0.18);
-      border-radius: 999px;
-      overflow: hidden;
+    .retry-btn {
+      margin-top: 4px;
+      padding: 10px 22px;
+      border-radius: 50px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: linear-gradient(135deg, #6e8efb, #a777e3);
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
 
-    .loading-progress-bar {
-      width: 0%;
-      height: 100%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #6e8efb, #a777e3, #6e8efb);
-      background-size: 200% 100%;
-      animation: progressFill 2.8s cubic-bezier(0.22, 1, 0.36, 1) forwards, progressShimmer 1.4s linear infinite;
+    .retry-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(110, 142, 251, 0.45);
     }
 
     @keyframes spinnerSpin {
       to { transform: rotate(360deg); }
     }
 
-    @keyframes progressFill {
-      0% { width: 10%; }
-      65% { width: 85%; }
-      100% { width: 100%; }
-    }
-
-    @keyframes progressShimmer {
-      0% { background-position: 200% 0; }
-      100% { background-position: -200% 0; }
-    }
-
-    /* =====================================================
-       CONTROLS, DESCRIPTION & RELATED VIDEOS
-       ===================================================== */
+    /* Controls & Floating Scroll Indicator */
     .controls {
       display: flex;
       justify-content: center;
       gap: 15px;
-      margin: 22px 0;
+      margin: 18px 0 14px;
       flex-wrap: wrap;
     }
 
@@ -377,6 +452,7 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       border: none;
       border-radius: 50px;
       cursor: pointer;
+      font-family: inherit;
       font-size: 16px;
       font-weight: bold;
       transition: all 0.3s;
@@ -386,6 +462,49 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     button:hover {
       transform: translateY(-2px);
       box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .scroll-indicator-wrap {
+      display: flex;
+      justify-content: center;
+      margin: 8px 0 22px;
+    }
+
+    .scroll-indicator {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 18px;
+      border-radius: 999px;
+      background-color: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #475569;
+      text-decoration: none;
+      font-size: 13.5px;
+      font-weight: 600;
+      animation: gentleFloat 2.4s ease-in-out infinite;
+      transition: color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .scroll-indicator:hover {
+      color: #6e8efb;
+      border-color: #c7d2fe;
+    }
+
+    .scroll-indicator svg {
+      width: 18px;
+      height: 18px;
+      color: #6e8efb;
+    }
+
+    @keyframes gentleFloat {
+      0%, 100% {
+        transform: translateY(0);
+      }
+      50% {
+        transform: translateY(5px);
+      }
     }
 
     .post-description {
@@ -400,7 +519,7 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       margin: 0 0 10px;
       font-size: clamp(1.25rem, 2.5vw, 1.65rem);
       color: #0f172a;
-      line-height: 1.3;
+      line-height: 1.35;
     }
 
     .post-description p {
@@ -468,7 +587,7 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       font-weight: 700;
       color: #0f172a;
       margin: 0 0 4px;
-      line-height: 1.35;
+      line-height: 1.4;
     }
 
     .related-meta {
@@ -476,7 +595,6 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       color: #64748b;
     }
 
-    /* Mobile Optimization */
     @media (max-width: 600px) {
       body {
         padding: 12px;
@@ -503,13 +621,18 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
         height: 24px;
       }
 
-      .loading-card {
-        padding: 18px 16px;
+      .bn-play-hint {
+        font-size: 12px;
+        padding: 5px 12px;
+      }
+
+      .overlay-glass-card {
+        padding: 18px 14px;
       }
 
       .controls {
         gap: 10px;
-        margin: 18px 0;
+        margin: 16px 0 12px;
       }
 
       button {
@@ -533,7 +656,10 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
         scroll-behavior: auto;
       }
       .play-icon::before,
-      .play-icon::after {
+      .play-icon::after,
+      .scroll-indicator,
+      .bn-player-heading-wrap,
+      .bn-play-hint {
         animation: none;
       }
     }
@@ -571,22 +697,43 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     </div>
   </aside>
 
+  <!-- BENGALI HEADING ABOVE VIDEO PLAYER -->
+  <div class="bn-player-heading-wrap">
+    <h2 class="bn-player-heading">সম্পূর্ণ ভিডিওটি দেখতে প্লে বাটনে ক্লিক করুন</h2>
+    <p class="bn-player-subheading">মোবাইল ও ডেস্কটপ উপযোগী এইচডি প্লেব্যাক</p>
+  </div>
+
   <!-- VIDEO PLAYER SECTION -->
   <div class="video-container" id="videoContainer">
     <img alt="${safeTitle}" id="videoThumbnail" src="${safeImageUrl}" />
-    <div class="play-icon" id="playIcon" role="button" tabindex="0" aria-label="Play video">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8 5.14v14l11-7-11-7z"></path>
-      </svg>
+    <div class="video-scrim" aria-hidden="true"></div>
+
+    <video id="videoPlayer" playsinline controls preload="none" poster="${safeImageUrl}"></video>
+
+    <div class="play-center-group" id="playCenterGroup">
+      <div class="play-icon" id="playIcon" role="button" tabindex="0" aria-label="ভিডিও চালু করুন">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 5.14v14l11-7-11-7z"></path>
+        </svg>
+      </div>
+      <div class="bn-play-hint">ভিডিও চালু করতে উপরের প্লে বাটনে চাপ দিন</div>
     </div>
-    <div class="loading-screen" id="loadingScreen" style="display: none;">
-      <div class="loading-card">
+
+    <!-- Friendly Bengali Loading Screen (shown only while buffering/loading) -->
+    <div class="loading-screen" id="loadingScreen" style="display: none;" aria-live="polite">
+      <div class="overlay-glass-card">
         <div class="loading-spinner" aria-hidden="true"></div>
-        <div class="loading-title">Loading video stream...</div>
-        <div class="loading-subtitle">Preparing HD playback</div>
-        <div class="loading-progress-track" aria-hidden="true">
-          <div class="loading-progress-bar" id="loadingProgressBar"></div>
-        </div>
+        <div class="overlay-title" id="loadingMessage">ভিডিও লোড হচ্ছে, অনুগ্রহ করে একটু অপেক্ষা করুন...</div>
+        <div class="overlay-subtitle">প্লেব্যাকের জন্য ভিডিও সোর্স সংযুক্ত করা হচ্ছে</div>
+      </div>
+    </div>
+
+    <!-- Real Failure Retry / Repeated Failure Error Overlay -->
+    <div class="playback-error-screen" id="playbackErrorScreen" style="display: none;" aria-live="assertive">
+      <div class="overlay-glass-card">
+        <div class="overlay-title" id="errorTitle">ভিডিওটি চালু করতে সমস্যা হয়েছে</div>
+        <div class="overlay-subtitle" id="errorSubtitle">অনুগ্রহ করে পুনরায় চেষ্টা করুন।</div>
+        <button type="button" class="retry-btn" id="retryPlayBtn">আবার চেষ্টা করুন</button>
       </div>
     </div>
   </div>
@@ -595,6 +742,17 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     <button type="button" id="btn1">Play Now</button>
     <button type="button" id="btn2">Watch Now</button>
     <button type="button" id="btn3">Play &amp; Watch</button>
+  </div>
+
+  <!-- FLOATING DOWNWARD SCROLL INDICATOR -->
+  <div class="scroll-indicator-wrap">
+    <a class="scroll-indicator" href="#postDescription">
+      <span>নিচে Scroll করুন</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 5v14"></path>
+        <path d="m19 12-7 7-7-7"></path>
+      </svg>
+    </a>
   </div>
 
   <!-- 3. PLAYER BOTTOM AD (Directly below the video player) -->
@@ -624,25 +782,25 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       </div>
     </aside>
 
-    <p>Enjoy uninterrupted, mobile-optimized playback that automatically adapts to portrait, square, and widescreen thumbnails without cropping or distortion.</p>
+    <p>পোর্ট্রেট, স্কয়ার কিংবা ল্যান্ডস্কেপ—যেকোনো থাম্বনেইল অনুপাতের সাথে স্বয়ংক্রিয়ভাবে মানিয়ে নেওয়া পরিচ্ছন্ন ও দ্রুতগতির ভিডিও প্লেয়ার।</p>
   </section>
 
   <!-- RELATED VIDEOS WITH RELATED CONTENT AD BETWEEN THEM -->
   <section class="related-section" aria-label="Related Videos">
-    <h2 class="related-heading">Related Videos</h2>
+    <h2 class="related-heading">সম্পর্কিত আরও ভিডিও</h2>
     <div class="related-grid">
       <a class="related-card" href="#videoContainer">
         <div class="related-thumb">Featured Stream</div>
         <div class="related-body">
           <div class="related-title">${safeTitle}</div>
-          <div class="related-meta">HD Stream &middot; Ready to Play</div>
+          <div class="related-meta">এইচডি স্ট্রিম &middot; দেখার জন্য প্রস্তুত</div>
         </div>
       </a>
       <a class="related-card" href="#videoContainer">
         <div class="related-thumb">Full Version</div>
         <div class="related-body">
           <div class="related-title">${safeCaption}</div>
-          <div class="related-meta">Adaptive Quality &middot; Mobile Ready</div>
+          <div class="related-meta">মোবাইল অপ্টিমাইজড</div>
         </div>
       </a>
     </div>
@@ -662,15 +820,15 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       <a class="related-card" href="#videoContainer">
         <div class="related-thumb">Highlights</div>
         <div class="related-body">
-          <div class="related-title">Watch Highlights &amp; Clips</div>
-          <div class="related-meta">Instant Playback</div>
+          <div class="related-title">জনপ্রিয় ক্লিপ ও হাইলাইটস দেখুন</div>
+          <div class="related-meta">দ্রুত লোডিং</div>
         </div>
       </a>
       <a class="related-card" href="#videoContainer">
-        <div class="related-thumb">Behind the Scenes</div>
+        <div class="related-thumb">Full Cut</div>
         <div class="related-body">
-          <div class="related-title">Extended Editorial Cut</div>
-          <div class="related-meta">Full Resolution</div>
+          <div class="related-title">সম্পূর্ণ সংস্করণ উপভোগ করুন</div>
+          <div class="related-meta">ফুল রেজোলিউশন</div>
         </div>
       </a>
     </div>
@@ -690,17 +848,25 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
   <script>
     // Configuration
     const CUSTOM_THUMBNAIL_URL = "${safeImageUrl}";
+    const CUSTOM_VIDEO_URL = "${safeVideoUrl}";
 
     // Core Player Elements
     const videoContainer = document.getElementById('videoContainer');
+    const playCenterGroup = document.getElementById('playCenterGroup');
     const playIcon = document.getElementById('playIcon');
     const loadingScreen = document.getElementById('loadingScreen');
-    const loadingProgressBar = document.getElementById('loadingProgressBar');
+    const loadingMessage = document.getElementById('loadingMessage');
+    const playbackErrorScreen = document.getElementById('playbackErrorScreen');
+    const errorTitle = document.getElementById('errorTitle');
+    const errorSubtitle = document.getElementById('errorSubtitle');
+    const retryPlayBtn = document.getElementById('retryPlayBtn');
     const videoThumbnail = document.getElementById('videoThumbnail');
+    const videoPlayer = document.getElementById('videoPlayer');
 
-    let playbackTimer = null;
+    let playbackFailures = 0;
+    let loadTimeoutId = null;
 
-    // 1. Auto Thumbnail Aspect Ratio (9:16, 16:9, 1:1 without cropping or stretching)
+    // Auto Thumbnail Aspect Ratio (9:16, 16:9, 1:1 without cropping or stretching)
     function adjustAspectRatio() {
       if (!videoThumbnail || !videoContainer) return;
       const w = videoThumbnail.naturalWidth;
@@ -712,11 +878,60 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       }
     }
 
-    function restartProgressAnimation() {
-      if (!loadingProgressBar) return;
-      loadingProgressBar.style.animation = 'none';
-      void loadingProgressBar.offsetWidth;
-      loadingProgressBar.style.animation = '';
+    function showLoadingState(messageText) {
+      if (loadingMessage && messageText) {
+        loadingMessage.textContent = messageText;
+      }
+      if (playbackErrorScreen) playbackErrorScreen.style.display = 'none';
+      if (playCenterGroup) playCenterGroup.classList.add('is-hidden');
+      if (playIcon) playIcon.classList.add('loading');
+      if (loadingScreen) loadingScreen.style.display = 'flex';
+    }
+
+    function hideOverlaysForPlayback() {
+      if (loadTimeoutId) clearTimeout(loadTimeoutId);
+      if (loadingScreen) loadingScreen.style.display = 'none';
+      if (playbackErrorScreen) playbackErrorScreen.style.display = 'none';
+      if (playIcon) playIcon.classList.remove('loading');
+      if (playCenterGroup) playCenterGroup.classList.remove('is-hidden');
+      if (videoContainer) videoContainer.classList.add('is-playing');
+    }
+
+    function handlePlaybackFailure() {
+      if (loadTimeoutId) clearTimeout(loadTimeoutId);
+      playbackFailures += 1;
+
+      if (loadingScreen) loadingScreen.style.display = 'none';
+      if (playIcon) playIcon.classList.remove('loading');
+      if (playCenterGroup) playCenterGroup.classList.add('is-hidden');
+      if (videoContainer) videoContainer.classList.remove('is-playing');
+
+      if (playbackFailures >= 2) {
+        if (errorTitle) {
+          errorTitle.textContent = 'দুঃখিত, বারবার চেষ্টা করেও ভিডিওটি চালু করা যায়নি';
+        }
+        if (errorSubtitle) {
+          errorSubtitle.textContent =
+            'অনুগ্রহ করে আপনার ইন্টারনেট সংযোগ পরীক্ষা করুন অথবা কিছুক্ষণ পর পুনরায় চেষ্টা করুন।';
+        }
+        if (retryPlayBtn) {
+          retryPlayBtn.textContent = 'পুনরায় চেষ্টা করুন';
+        }
+      } else {
+        if (errorTitle) {
+          errorTitle.textContent = 'ভিডিওটি লোড হতে ব্যর্থ হয়েছে';
+        }
+        if (errorSubtitle) {
+          errorSubtitle.textContent = 'সংযোগে সাময়িক ত্রুটি দেখা দিয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।';
+        }
+        if (retryPlayBtn) {
+          retryPlayBtn.textContent = 'আবার চেষ্টা করুন';
+        }
+      }
+
+      if (playbackErrorScreen) {
+        playbackErrorScreen.style.display = 'flex';
+      }
     }
 
     function init() {
@@ -727,23 +942,58 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
           adjustAspectRatio();
         }
       }
+
+      if (videoPlayer) {
+        videoPlayer.addEventListener('playing', hideOverlaysForPlayback);
+        videoPlayer.addEventListener('canplay', function () {
+          if (loadingScreen && loadingScreen.style.display === 'flex') {
+            hideOverlaysForPlayback();
+          }
+        });
+        videoPlayer.addEventListener('error', handlePlaybackFailure);
+      }
     }
 
-    // Safe non-intrusive playback UI handler (never forces redirects or popups)
+    // Real video playback handler (no fake progress, no popups, no forced redirects)
     function handleAction() {
-      if (!playIcon || !loadingScreen) return;
+      if (!videoPlayer) return;
       if (videoContainer) {
         videoContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
-      playIcon.classList.add('loading');
-      restartProgressAnimation();
-      loadingScreen.style.display = 'flex';
 
-      if (playbackTimer) clearTimeout(playbackTimer);
-      playbackTimer = setTimeout(function () {
-        playIcon.classList.remove('loading');
-        loadingScreen.style.display = 'none';
-      }, 2800);
+      const sourceUrl = CUSTOM_VIDEO_URL || videoPlayer.getAttribute('src') || '';
+      if (!sourceUrl) {
+        handlePlaybackFailure();
+        return;
+      }
+
+      showLoadingState('ভিডিও লোড হচ্ছে, অনুগ্রহ করে একটু অপেক্ষা করুন...');
+
+      if (videoPlayer.src !== sourceUrl) {
+        videoPlayer.src = sourceUrl;
+        videoPlayer.load();
+      }
+
+      if (loadTimeoutId) clearTimeout(loadTimeoutId);
+      loadTimeoutId = setTimeout(function () {
+        if (videoPlayer.readyState < 2) {
+          handlePlaybackFailure();
+        }
+      }, 10000);
+
+      const playPromise = videoPlayer.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(function () {
+            hideOverlaysForPlayback();
+          })
+          .catch(function (err) {
+            // Only trigger failure UI when actual media loading/playback fails
+            if (err && err.name !== 'AbortError') {
+              handlePlaybackFailure();
+            }
+          });
+      }
     }
 
     document.querySelectorAll('.controls button').forEach(function (button) {
@@ -763,13 +1013,22 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       });
     }
 
-    if (videoContainer) {
-      videoContainer.addEventListener('click', handleAction);
+    if (retryPlayBtn) {
+      retryPlayBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        handleAction();
+      });
     }
 
-    // =====================================================
-    // 2. SMART LAZY-LOADING & FALLBACK ADVERTISEMENT SYSTEM
-    // =====================================================
+    if (videoContainer) {
+      videoContainer.addEventListener('click', function () {
+        if (!videoContainer.classList.contains('is-playing')) {
+          handleAction();
+        }
+      });
+    }
+
+    // Smart Lazy-Loading & Fallback Advertisement System
     const adQueue = [];
     let isProcessingAdQueue = false;
 
@@ -795,7 +1054,6 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       };
       targetEl.appendChild(script);
 
-      // Fallback check if network or blocker prevents ad rendering
       setTimeout(function () {
         const hasRenderedAd = targetEl.querySelector('iframe, img, ins, a');
         if (!hasRenderedAd) {
