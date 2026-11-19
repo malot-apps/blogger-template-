@@ -8,14 +8,44 @@ export interface ButtonClickSetting {
   triggerPlayback: boolean;
 }
 
+export interface RewardUnlockConfig {
+  enabled: boolean;
+  step1DurationSec: number;
+  step2DurationSec: number;
+  step1Url: string;
+  step2Url: string;
+}
+
+export interface AdBlockDetectorConfig {
+  enabled: boolean;
+  allowDismiss: boolean;
+}
+
 export interface TemplateConfig {
   title: string;
   caption: string;
   imageUrl: string;
   videoUrl: string;
+  metaDescription?: string;
+  canonicalUrl?: string;
   buttonCooldownMs?: number;
   buttons?: Record<ButtonId, ButtonClickSetting>;
+  rewardUnlock?: RewardUnlockConfig;
+  adBlockDetector?: AdBlockDetectorConfig;
 }
+
+export const DEFAULT_ADBLOCK_DETECTOR: AdBlockDetectorConfig = {
+  enabled: true,
+  allowDismiss: false,
+};
+
+export const DEFAULT_REWARD_UNLOCK: RewardUnlockConfig = {
+  enabled: true,
+  step1DurationSec: 5,
+  step2DurationSec: 5,
+  step1Url: 'https://cheflobesofficer.com/b1b9djat?key=a45917b862f040650d5da9b0f6ceac52',
+  step2Url: 'https://www.effectivecpmnetwork.com/b1b9djat?key=a45917b862f040650d5da9b0f6ceac52',
+};
 
 export const DEFAULT_BUTTON_SETTINGS: Record<ButtonId, ButtonClickSetting> = {
   btn1: {
@@ -41,6 +71,123 @@ export const DEFAULT_BUTTON_SETTINGS: Record<ButtonId, ButtonClickSetting> = {
   },
 };
 
+export function isStrictJpgUrl(rawUrl: string): boolean {
+  if (typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+  if (/^data:image\/jpeg/i.test(trimmed)) return true;
+  if (/^data:image\//i.test(trimmed)) return false;
+  if (/\.(png|gif|webp|svg|bmp|ico|avif)(\?|#|$)/i.test(trimmed)) return false;
+  return /\.(jpe?g)(\?|#|$)/i.test(trimmed);
+}
+
+export function isSupportedImageUrl(rawUrl: string): boolean {
+  if (typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+  if (/^(javascript|vbscript|file):/i.test(trimmed)) return false;
+  if (/^data:/i.test(trimmed)) {
+    return /^data:image\/(jpeg|jpg|png|webp|gif|avif|bmp|svg\+xml)/i.test(trimmed);
+  }
+  return true;
+}
+
+export interface ParsedSourcePost {
+  title: string;
+  caption: string;
+  primaryJpgUrl: string;
+  jpgImages: string[];
+  skippedNonJpgCount: number;
+}
+
+/**
+ * Parses a raw source blog post HTML snippet:
+ * - Strictly extracts ONLY JPG/JPEG images
+ * - Automatically ignores, skips, and counts PNG or non-JPG assets
+ */
+export function extractSourceBlogPost(rawHtml: string): ParsedSourcePost {
+  const input = String(rawHtml || '').trim();
+  if (!input) {
+    return {
+      title: '',
+      caption: '',
+      primaryJpgUrl: '',
+      jpgImages: [],
+      skippedNonJpgCount: 0,
+    };
+  }
+
+  const candidateUrls: string[] = [];
+  let title = '';
+  let caption = '';
+
+  if (typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(input, 'text/html');
+    doc.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src') || img.getAttribute('data-src') || '';
+      if (src) candidateUrls.push(src.trim());
+    });
+    doc.querySelectorAll('a[href]').forEach((anchor) => {
+      const href = anchor.getAttribute('href') || '';
+      if (/\.(jpe?g|png|gif|webp|svg|bmp|avif)(\?|#|$)/i.test(href)) {
+        candidateUrls.push(href.trim());
+      }
+    });
+
+    const headingEl = doc.querySelector('h1, h2, h3, title');
+    if (headingEl && headingEl.textContent) {
+      title = headingEl.textContent.trim();
+    }
+    if (!title) {
+      const altImg = doc.querySelector('img[alt]');
+      if (altImg) title = (altImg.getAttribute('alt') || '').trim();
+    }
+
+    const pEl = doc.querySelector('p, .separator a:last-child, figcaption');
+    if (pEl && pEl.textContent) {
+      caption = pEl.textContent.trim();
+    }
+  } else {
+    const urlMatches = input.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+    candidateUrls.push(...urlMatches);
+  }
+
+  const uniqueCandidates = Array.from(new Set(candidateUrls));
+  const jpgImages: string[] = [];
+  let skippedNonJpgCount = 0;
+
+  uniqueCandidates.forEach((url) => {
+    if (isStrictJpgUrl(url)) {
+      jpgImages.push(url);
+    } else if (
+      /\.(png|gif|webp|svg|bmp|ico|avif)(\?|#|$)/i.test(url) ||
+      /^data:image\//i.test(url)
+    ) {
+      skippedNonJpgCount += 1;
+    }
+  });
+
+  if (!caption) {
+    const plainText = input
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (plainText) {
+      caption = plainText.slice(0, 180);
+    }
+  }
+
+  return {
+    title,
+    caption,
+    primaryJpgUrl: jpgImages[0] || '',
+    jpgImages,
+    skippedNonJpgCount,
+  };
+}
+
 function escapeJsString(value: string): string {
   return String(value || '')
     .replace(/\\/g, '\\\\')
@@ -49,24 +196,55 @@ function escapeJsString(value: string): string {
     .replace(/[\r\n]+/g, '');
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/[\r\n]+/g, ' ')
+    .trim();
+}
+
 /**
  * Generates the complete, Blogger-compatible single-file HTML template with:
+ * - Strict JPG-only image enforcement (ignores/skips PNG & non-JPG assets)
  * - Preserved 6-slot Smart Advertisement System (lazy loading, responsive, fallback, CLS-safe)
- * - Preserved auto-sizing thumbnail aspect ratio (--video-ratio) and #btn1/#btn2/#btn3
- * - Professional Bengali CTA texts, typography, loading & real failure retry/error states
- * - Configurable JavaScript Button Click System (per-button URLs, tab mode, enable/disable, anti-duplicate cooldown)
- * - Genuine HTML5 video playback & real error-event retry handling (no automatic popups or forced redirects)
+ * - Floating Bengali downward scroll indicator directly below player controls
+ * - Live random viewer badge (1577-5285) with smooth fade-in/out updates
+ * - Configurable JavaScript Button Click System & genuine HTML5 video playback
  */
 export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
   const safeTitle = config.title || '{{TITLE}}';
   const safeCaption = config.caption || '{{CAPTION}}';
-  const safeImageUrl = config.imageUrl || '{{IMAGE_URL}}';
+  const rawImage = (config.imageUrl || '').trim();
+  const safeImageUrl =
+    !rawImage || rawImage === '{{IMAGE_URL}}'
+      ? '{{IMAGE_URL}}'
+      : isSupportedImageUrl(rawImage)
+      ? rawImage
+      : '';
   const safeVideoUrl = config.videoUrl || '';
+  const cleanMetaDescription = escapeHtmlAttribute(config.metaDescription || '');
+  const rawCanonicalUrl = (config.canonicalUrl || '').trim();
+  const isValidCanonicalUrl = /^https?:\/\/\S+$/i.test(rawCanonicalUrl);
+  const metaDescriptionTag = cleanMetaDescription
+    ? `\n  <meta name="description" content="${cleanMetaDescription}" />`
+    : '';
+  const canonicalLinkTag = isValidCanonicalUrl
+    ? `\n  <link rel="canonical" href="${escapeHtmlAttribute(rawCanonicalUrl)}" />`
+    : '';
   const cooldownMs =
     typeof config.buttonCooldownMs === 'number' && config.buttonCooldownMs >= 0
       ? Math.round(config.buttonCooldownMs)
       : 1200;
   const buttons = config.buttons || DEFAULT_BUTTON_SETTINGS;
+  const rewardUnlock = config.rewardUnlock || DEFAULT_REWARD_UNLOCK;
+  const adBlockDetector = config.adBlockDetector || DEFAULT_ADBLOCK_DETECTOR;
+  const step1Sec = Math.max(1, Math.round(rewardUnlock.step1DurationSec || 5));
+  const step2Sec = Math.max(1, Math.round(rewardUnlock.step2DurationSec || 5));
+  const toBn = (num: number) =>
+    String(num).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
 
   return `<!DOCTYPE html>
 <html lang="bn">
@@ -74,7 +252,7 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
   <script src="https://pl30161573.effectivecpmnetwork.com/bc/17/d1/bc17d177bcada949929a7511850a6cf0.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${safeTitle}</title>
+  <title>${safeTitle}</title>${metaDescriptionTag}${canonicalLinkTag}
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -230,7 +408,8 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     /* Auto-Sizing Video Player Container */
     .video-container {
       position: relative;
-      width: 100%;
+      width: min(100%, var(--video-max-width, 100%));
+      max-width: 100%;
       aspect-ratio: var(--video-ratio, 16 / 9);
       height: auto;
       margin: 12px auto 18px;
@@ -240,27 +419,21 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
       cursor: pointer;
       user-select: none;
+      contain: layout style;
       -webkit-tap-highlight-color: transparent;
-    }
-
-    .video-container.is-portrait {
-      max-width: min(100%, 420px);
-    }
-
-    .video-container.is-square {
-      max-width: min(100%, 560px);
     }
 
     #videoThumbnail {
       width: 100%;
       height: 100%;
       object-fit: contain;
+      object-position: center center;
       display: block;
-      transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+      transition: opacity 0.25s ease;
     }
 
-    .video-container:hover #videoThumbnail {
-      transform: scale(1.025);
+    .video-container.has-thumb-error #videoThumbnail {
+      opacity: 0;
     }
 
     .video-container.is-playing #videoThumbnail,
@@ -282,6 +455,7 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       inset: 0;
       width: 100%;
       height: 100%;
+      object-fit: contain;
       display: none;
       background: #000;
       z-index: 20;
@@ -291,18 +465,73 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       display: block;
     }
 
+    /* Live Viewer Counter Badge Over Video Player */
+    .live-viewer-badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 25;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.72);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      color: #ffffff;
+      font-size: 12.5px;
+      font-weight: 600;
+      line-height: 1.2;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .live-viewer-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #ef4444;
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.85);
+      flex-shrink: 0;
+      animation: liveDotPulse 1.6s ease-in-out infinite;
+    }
+
+    .live-viewer-count {
+      font-variant-numeric: tabular-nums;
+      display: inline-block;
+      transition: opacity 0.28s ease, transform 0.28s ease;
+    }
+
+    .live-viewer-count.is-updating {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+
+    @keyframes liveDotPulse {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.45;
+        transform: scale(0.85);
+      }
+    }
+
     /* Centered Play Button + Bengali Instruction Group */
     .play-center-group {
       position: absolute;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -46%);
+      transform: translate(-50%, -50%);
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 14px;
+      justify-content: center;
       z-index: 10;
-      width: min(90%, 340px);
       pointer-events: none;
     }
 
@@ -376,6 +605,12 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
 
     /* Short Bengali instruction directly below Play button */
     .bn-play-hint {
+      position: absolute;
+      top: calc(100% + 12px);
+      left: 50%;
+      transform: translateX(-50%);
+      width: max-content;
+      max-width: min(82vw, 290px);
       padding: 6px 14px;
       border-radius: 999px;
       background: rgba(15, 23, 42, 0.72);
@@ -388,8 +623,17 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       text-align: center;
       line-height: 1.4;
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
-      animation: bnFadeSlideUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+      animation: bnHintFadeIn 0.55s ease 0.12s both;
       transition: opacity 0.2s ease;
+    }
+
+    @keyframes bnHintFadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
     }
 
     .play-center-group.is-hidden {
@@ -686,6 +930,14 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
         padding: 5px 12px;
       }
 
+      .live-viewer-badge {
+        top: 10px;
+        left: 10px;
+        padding: 5px 10px;
+        font-size: 11.5px;
+        gap: 6px;
+      }
+
       .overlay-glass-card {
         padding: 18px 14px;
       }
@@ -709,6 +961,365 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       .related-grid {
         grid-template-columns: 1fr;
       }
+
+      .unlock-modal-card {
+        padding: 18px 16px;
+      }
+    }
+
+    /* Reward-Style 2-Step Ad-Watch & Timer Unlock Modal */
+    .play-lock-pill {
+      position: absolute;
+      bottom: -8px;
+      right: -6px;
+      min-width: 26px;
+      height: 26px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: #0f172a;
+      border: 2px solid #ffffff;
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    .play-icon[data-unlocked="true"] .play-lock-pill {
+      opacity: 0;
+      transform: scale(0.7);
+      pointer-events: none;
+    }
+
+    .unlock-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.74);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .unlock-modal-backdrop.is-open {
+      display: flex;
+    }
+
+    .unlock-modal-card {
+      position: relative;
+      width: min(460px, 100%);
+      max-height: 92vh;
+      overflow-y: auto;
+      padding: 24px 22px 22px;
+      border-radius: 18px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 24px 56px rgba(15, 23, 42, 0.38);
+      color: #1e293b;
+      animation: bnFadeSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .unlock-modal-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 32px;
+      height: 32px;
+      min-width: 0;
+      padding: 0;
+      border-radius: 50%;
+      background: #f1f5f9;
+      color: #475569;
+      font-size: 16px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: none;
+    }
+
+    .unlock-modal-close:hover {
+      background: #e2e8f0;
+      color: #0f172a;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .unlock-modal-header {
+      padding-right: 36px;
+      margin-bottom: 14px;
+    }
+
+    .unlock-modal-kicker {
+      display: inline-block;
+      margin-bottom: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4f46e5;
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+
+    .unlock-modal-title {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.45;
+    }
+
+    .unlock-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin: 14px 0 16px;
+    }
+
+    .unlock-step-card {
+      padding: 13px 14px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      background: #f8fafc;
+      transition: border-color 0.2s ease, background-color 0.2s ease;
+    }
+
+    .unlock-step-card.is-active {
+      border-color: #6e8efb;
+      background: #f5f7ff;
+    }
+
+    .unlock-step-card.is-completed {
+      border-color: #10b981;
+      background: #ecfdf5;
+    }
+
+    .unlock-step-text {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      line-height: 1.5;
+    }
+
+    .unlock-step-timer {
+      font-weight: 700;
+      color: #4f46e5;
+    }
+
+    .unlock-step-card.is-completed .unlock-step-timer {
+      color: #047857;
+    }
+
+    .unlock-step-btn {
+      width: 100%;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #6e8efb, #a777e3);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(110, 142, 251, 0.28);
+    }
+
+    .unlock-step-btn:disabled {
+      background: #cbd5e1;
+      color: #64748b;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .unlock-step-card.is-completed .unlock-step-btn {
+      background: #10b981;
+      color: #ffffff;
+      box-shadow: none;
+    }
+
+    .unlock-status-banner {
+      padding: 11px 14px;
+      border-radius: 10px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #92400e;
+      font-size: 13.5px;
+      font-weight: 600;
+      text-align: center;
+      line-height: 1.5;
+      margin-bottom: 12px;
+      transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+    }
+
+    .unlock-status-banner.is-unlocked {
+      background: #ecfdf5;
+      border-color: #6ee7b7;
+      color: #065f46;
+    }
+
+    .unlock-final-play-btn {
+      width: 100%;
+      padding: 12px 20px;
+      border-radius: 50px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .unlock-final-play-btn:disabled {
+      background: #e2e8f0;
+      color: #94a3b8;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    /* Polite Bengali Ad-Blocker Detection Notice */
+    .adblock-notice-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 10050;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.78);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .adblock-notice-backdrop.is-open {
+      display: flex;
+    }
+
+    .adblock-notice-card {
+      width: min(460px, 100%);
+      max-height: 92vh;
+      overflow-y: auto;
+      padding: 24px 22px 22px;
+      border-radius: 18px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 24px 56px rgba(15, 23, 42, 0.42);
+      color: #1e293b;
+      animation: bnFadeSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .adblock-notice-kicker {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      color: #c2410c;
+      font-size: 11.5px;
+      font-weight: 700;
+    }
+
+    .adblock-notice-title {
+      margin: 0 0 10px;
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.45;
+    }
+
+    .adblock-notice-desc {
+      margin: 0 0 14px;
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.65;
+    }
+
+    .adblock-notice-steps {
+      margin: 0 0 14px;
+      padding: 12px 14px 12px 30px;
+      border-radius: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      font-size: 13.5px;
+      color: #334155;
+      line-height: 1.6;
+    }
+
+    .adblock-notice-steps li + li {
+      margin-top: 4px;
+    }
+
+    .adblock-notice-status {
+      display: none;
+      margin-bottom: 12px;
+      padding: 9px 12px;
+      border-radius: 10px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      font-size: 12.5px;
+      font-weight: 600;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .adblock-notice-status.is-visible {
+      display: block;
+    }
+
+    .adblock-notice-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    .adblock-btn-primary {
+      width: 100%;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 14.5px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #6e8efb, #a777e3);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(110, 142, 251, 0.28);
+    }
+
+    .adblock-btn-secondary {
+      width: 100%;
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      font-weight: 700;
+      background: #f1f5f9;
+      color: #1e293b;
+      border: 1px solid #cbd5e1;
+      box-shadow: none;
+    }
+
+    .adblock-btn-secondary:hover {
+      background: #e2e8f0;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .adblock-btn-ghost {
+      width: 100%;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      background: transparent;
+      color: #64748b;
+      box-shadow: none;
+    }
+
+    .adblock-btn-ghost:hover {
+      background: #f8fafc;
+      color: #0f172a;
+      box-shadow: none;
+      transform: none;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -719,7 +1330,10 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       .play-icon::after,
       .scroll-indicator,
       .bn-player-heading-wrap,
-      .bn-play-hint {
+      .bn-play-hint,
+      .live-viewer-dot,
+      .unlock-modal-card,
+      .adblock-notice-card {
         animation: none;
       }
     }
@@ -765,16 +1379,23 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
 
   <!-- VIDEO PLAYER SECTION -->
   <div class="video-container" id="videoContainer">
-    <img alt="${safeTitle}" id="videoThumbnail" src="${safeImageUrl}" />
+    <div class="live-viewer-badge" aria-live="off">
+      <span class="live-viewer-dot" aria-hidden="true"></span>
+      <span class="live-viewer-count" id="liveViewerCount">২,৮৪০</span>
+      <span>জন দেখছেন</span>
+    </div>
+
+    <img alt="${safeTitle}" id="videoThumbnail" decoding="async" loading="eager" src="${safeImageUrl}" />
     <div class="video-scrim" aria-hidden="true"></div>
 
     <video id="videoPlayer" playsinline controls preload="none" poster="${safeImageUrl}"></video>
 
     <div class="play-center-group" id="playCenterGroup">
-      <div class="play-icon" id="playIcon" role="button" tabindex="0" aria-label="ভিডিও চালু করুন">
+      <div class="play-icon" id="playIcon" data-unlocked="${rewardUnlock.enabled ? 'false' : 'true'}" role="button" tabindex="0" aria-label="ভিডিও চালু করুন">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M8 5.14v14l11-7-11-7z"></path>
         </svg>
+        <span class="play-lock-pill" aria-hidden="true">&#128274;</span>
       </div>
       <div class="bn-play-hint">ভিডিও চালু করতে উপরের প্লে বাটনে চাপ দিন</div>
     </div>
@@ -905,6 +1526,63 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     </div>
   </aside>
 
+  <!-- REWARD AD-WATCH & TIMER UNLOCK MODAL -->
+  <div class="unlock-modal-backdrop" id="unlockModal" role="dialog" aria-modal="true" aria-labelledby="unlockModalTitle">
+    <div class="unlock-modal-card">
+      <button type="button" class="unlock-modal-close" id="unlockModalClose" aria-label="বন্ধ করুন">&times;</button>
+
+      <div class="unlock-modal-header">
+        <span class="unlock-modal-kicker">নিরাপদ ভিডিও আনলক</span>
+        <h3 class="unlock-modal-title" id="unlockModalTitle">ভিডিওটি আনলক করতে নিচের নিয়মগুলো অনুসরণ করুন:</h3>
+      </div>
+
+      <div class="unlock-steps">
+        <div class="unlock-step-card is-active" id="unlockStep1Card">
+          <p class="unlock-step-text">
+            ধাপ ১: প্রথম বিজ্ঞাপনটি সম্পূর্ণ দেখুন (অবশিষ্ট সময়: <span class="unlock-step-timer" id="timer1">${toBn(step1Sec)}</span> সেকেন্ড)
+          </p>
+          <button type="button" class="unlock-step-btn" id="unlockStep1Btn">বিজ্ঞাপন ১ দেখুন</button>
+        </div>
+
+        <div class="unlock-step-card" id="unlockStep2Card">
+          <p class="unlock-step-text">
+            ধাপ ২: দ্বিতীয় বিজ্ঞাপনটি সম্পন্ন করুন (অবশিষ্ট সময়: <span class="unlock-step-timer" id="timer2">${toBn(step2Sec)}</span> সেকেন্ড)
+          </p>
+          <button type="button" class="unlock-step-btn" id="unlockStep2Btn" disabled>বিজ্ঞাপন ২ দেখুন</button>
+        </div>
+      </div>
+
+      <div class="unlock-status-banner" id="unlockStatusBanner" aria-live="polite">
+        উভয় ধাপ সম্পন্ন না হওয়া পর্যন্ত প্লে বাটনটি লক থাকবে।
+      </div>
+
+      <button type="button" class="unlock-final-play-btn" id="unlockedPlayBtn" disabled>
+        ভিডিও আনলক করতে ধাপ ২টি সম্পন্ন করুন
+      </button>
+    </div>
+  </div>
+
+  <!-- POLITE BENGALI AD-BLOCKER DETECTION NOTICE -->
+  <div class="adblock-notice-backdrop" id="adblockNoticeModal" role="dialog" aria-modal="true" aria-labelledby="adblockNoticeTitle">
+    <div class="adblock-notice-card">
+      <span class="adblock-notice-kicker">বিনীত অনুরোধ · অ্যাড-ব্লকার শনাক্ত</span>
+      <h3 class="adblock-notice-title" id="adblockNoticeTitle">দয়া করে আপনার অ্যাড-ব্লকার বন্ধ করুন</h3>
+      <p class="adblock-notice-desc">
+        আমাদের সাইটের সমস্ত ভিডিও এবং কনটেন্ট সম্পূর্ণ বিনামূল্যে সবার জন্য উন্মুক্ত রাখতে বিজ্ঞাপনই একমাত্র সহায়ক। কনটেন্টটি দেখতে অনুগ্রহ করে এই পেজের জন্য আপনার অ্যাড-ব্লকারটি সাময়িকভাবে বন্ধ করে পেজটি রিফ্রেশ করুন।
+      </p>
+      <ol class="adblock-notice-steps">
+        <li>আপনার ব্রাউজারের অ্যাড-ব্লকার এক্সটেনশন আইকনে ক্লিক করুন।</li>
+        <li>এই ওয়েবসাইটের জন্য অ্যাড-ব্লকারটি বন্ধ বা পজ (Pause / Whitelist) করুন।</li>
+        <li>নিচের বাটনে ক্লিক করে পেজটি রিফ্রেশ করুন।</li>
+      </ol>
+      <div class="adblock-notice-status" id="adblockNoticeStatus" aria-live="polite"></div>
+      <div class="adblock-notice-actions">
+        <button type="button" class="adblock-btn-primary" id="adblockRefreshBtn">আমি বন্ধ করেছি, পেজ রিফ্রেশ করুন</button>
+        <button type="button" class="adblock-btn-secondary" id="adblockRecheckBtn">পুনরায় যাচাই করুন</button>${adBlockDetector.allowDismiss ? '\n        <button type="button" class="adblock-btn-ghost" id="adblockDismissBtn">আপাতত বন্ধ রাখুন</button>' : ''}
+      </div>
+    </div>
+  </div>
+
   <script>
     // =========================================================================
     // 1. MEDIA & THUMBNAIL CONFIGURATION
@@ -913,7 +1591,27 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     const CUSTOM_VIDEO_URL = "${escapeJsString(safeVideoUrl)}";
 
     // =========================================================================
-    // 2. BUTTON CLICK & AD LINK CONFIGURATION
+    // 1B. AD-BLOCK DETECTION CONFIGURATION
+    // =========================================================================
+    const ADBLOCK_DETECTOR_CONFIG = {
+      enabled: ${adBlockDetector.enabled},
+      allowDismiss: ${adBlockDetector.allowDismiss}
+    };
+
+    // =========================================================================
+    // 2. REWARD AD-WATCH & TIMER UNLOCK CONFIGURATION
+    // Visitors must complete both sequential steps before the play button unlocks.
+    // =========================================================================
+    const REWARD_UNLOCK_CONFIG = {
+      enabled: ${rewardUnlock.enabled},
+      step1DurationSec: ${step1Sec},
+      step2DurationSec: ${step2Sec},
+      step1Url: "${escapeJsString(rewardUnlock.step1Url)}",
+      step2Url: "${escapeJsString(rewardUnlock.step2Url)}"
+    };
+
+    // =========================================================================
+    // 3. BUTTON CLICK & AD LINK CONFIGURATION
     // Configure individual button URLs, enable/disable actions, tab behavior,
     // and duplicate-click protection in one place.
     // =========================================================================
@@ -953,20 +1651,87 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     const retryPlayBtn = document.getElementById('retryPlayBtn');
     const videoThumbnail = document.getElementById('videoThumbnail');
     const videoPlayer = document.getElementById('videoPlayer');
+    const liveViewerCount = document.getElementById('liveViewerCount');
+
+    const BENGALI_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+    function toBengaliDigits(val) {
+      return String(val).replace(/\d/g, function (d) {
+        return BENGALI_DIGITS[Number(d)];
+      });
+    }
+
+    const VIEWER_MIN = 1577;
+    const VIEWER_MAX = 5285;
+    let currentViewerCount = VIEWER_MIN;
+
+    function getRandomViewerCount(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function formatViewerNumber(num) {
+      return toBengaliDigits(num.toLocaleString('en-US'));
+    }
+
+    function initLiveViewerCounter() {
+      if (!liveViewerCount) return;
+      currentViewerCount = getRandomViewerCount(VIEWER_MIN, VIEWER_MAX);
+      liveViewerCount.textContent = formatViewerNumber(currentViewerCount);
+
+      function scheduleNextUpdate() {
+        const delayMs = 3200 + Math.floor(Math.random() * 2600);
+        setTimeout(function () {
+          const delta = Math.floor(Math.random() * 141) - 70;
+          let nextCount = currentViewerCount + delta;
+          if (nextCount < VIEWER_MIN || nextCount > VIEWER_MAX || nextCount === currentViewerCount) {
+            nextCount = getRandomViewerCount(VIEWER_MIN, VIEWER_MAX);
+          }
+          currentViewerCount = nextCount;
+
+          liveViewerCount.classList.add('is-updating');
+          setTimeout(function () {
+            liveViewerCount.textContent = formatViewerNumber(currentViewerCount);
+            liveViewerCount.classList.remove('is-updating');
+          }, 260);
+
+          scheduleNextUpdate();
+        }, delayMs);
+      }
+
+      scheduleNextUpdate();
+    }
 
     let playbackFailures = 0;
     let loadTimeoutId = null;
 
-    // Auto Thumbnail Aspect Ratio (9:16, 16:9, 1:1 without cropping or stretching)
+    // Auto Thumbnail Aspect Ratio & Width (16:9, 9:16, 1:1, 4:3, 2:3 & any custom ratio)
+    function applyContainerDimensions(w, h) {
+      if (!videoContainer || !(w > 0) || !(h > 0)) return;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 820;
+      const maxComfortableHeight = Math.max(340, Math.min(680, Math.round(viewportHeight * 0.78)));
+      const targetWidth = Math.min(w, Math.round(maxComfortableHeight * (w / h)));
+      videoContainer.style.setProperty('--video-ratio', w + ' / ' + h);
+      videoContainer.style.setProperty('--video-max-width', targetWidth + 'px');
+      videoContainer.classList.toggle('is-portrait', h > w);
+      videoContainer.classList.toggle('is-square', w === h);
+      videoContainer.classList.toggle('is-landscape', w > h);
+    }
+
     function adjustAspectRatio() {
       if (!videoThumbnail || !videoContainer) return;
       const w = videoThumbnail.naturalWidth;
       const h = videoThumbnail.naturalHeight;
       if (w > 0 && h > 0) {
-        videoContainer.style.setProperty('--video-ratio', w + ' / ' + h);
-        videoContainer.classList.toggle('is-portrait', h > w);
-        videoContainer.classList.toggle('is-square', w === h);
+        videoContainer.classList.remove('has-thumb-error');
+        applyContainerDimensions(w, h);
       }
+    }
+
+    function handleThumbnailError() {
+      if (!videoContainer) return;
+      videoContainer.classList.add('has-thumb-error');
+      videoContainer.style.setProperty('--video-ratio', '16 / 9');
+      videoContainer.style.setProperty('--video-max-width', '100%');
+      videoContainer.classList.remove('is-portrait', 'is-square', 'is-landscape');
     }
 
     function showLoadingState(messageText) {
@@ -1025,14 +1790,255 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       }
     }
 
-    function init() {
-      if (CUSTOM_THUMBNAIL_URL && videoThumbnail) {
-        videoThumbnail.addEventListener('load', adjustAspectRatio);
-        videoThumbnail.src = CUSTOM_THUMBNAIL_URL;
-        if (videoThumbnail.complete && videoThumbnail.naturalWidth > 0) {
-          adjustAspectRatio();
+    function isSupportedImageAsset(url) {
+      if (typeof url !== 'string') return false;
+      const trimmed = url.trim();
+      if (!trimmed || trimmed === '{{IMAGE_URL}}') return false;
+      if (/^(javascript|vbscript|file):/i.test(trimmed)) return false;
+      if (/^data:/i.test(trimmed)) {
+        return /^data:image\/(jpeg|jpg|png|webp|gif|avif|bmp|svg\+xml)/i.test(trimmed);
+      }
+      return true;
+    }
+
+    function initThumbnailSizing() {
+      if (!videoThumbnail) return;
+
+      let resolvedImageUrl = isSupportedImageAsset(CUSTOM_THUMBNAIL_URL)
+        ? CUSTOM_THUMBNAIL_URL.trim()
+        : '';
+
+      if (!resolvedImageUrl) {
+        const separatorImages = document.querySelectorAll('.separator img');
+        for (let i = 0; i < separatorImages.length; i += 1) {
+          const candidate =
+            separatorImages[i].getAttribute('data-src') ||
+            separatorImages[i].getAttribute('src') ||
+            '';
+          if (isSupportedImageAsset(candidate)) {
+            resolvedImageUrl = candidate.trim();
+            break;
+          }
         }
       }
+
+      if (!resolvedImageUrl) {
+        const thumbDataSrc = videoThumbnail.getAttribute('data-src') || '';
+        if (isSupportedImageAsset(thumbDataSrc)) {
+          resolvedImageUrl = thumbDataSrc.trim();
+        }
+      }
+
+      videoThumbnail.addEventListener('load', adjustAspectRatio);
+      videoThumbnail.addEventListener('error', handleThumbnailError);
+
+      if (videoPlayer) {
+        videoPlayer.addEventListener('loadedmetadata', function () {
+          if (
+            (!videoThumbnail.naturalWidth || !videoThumbnail.naturalHeight) &&
+            videoPlayer.videoWidth > 0 &&
+            videoPlayer.videoHeight > 0
+          ) {
+            applyContainerDimensions(videoPlayer.videoWidth, videoPlayer.videoHeight);
+          }
+        });
+      }
+
+      if (resolvedImageUrl) {
+        if (videoThumbnail.getAttribute('src') !== resolvedImageUrl) {
+          videoThumbnail.src = resolvedImageUrl;
+        }
+        if (videoPlayer) {
+          videoPlayer.setAttribute('poster', resolvedImageUrl);
+        }
+        if (videoThumbnail.complete) {
+          if (videoThumbnail.naturalWidth > 0) {
+            adjustAspectRatio();
+          } else {
+            handleThumbnailError();
+          }
+        }
+      } else if (CUSTOM_THUMBNAIL_URL && CUSTOM_THUMBNAIL_URL !== '{{IMAGE_URL}}') {
+        handleThumbnailError();
+      }
+
+      let resizeRaf = null;
+      window.addEventListener('resize', function () {
+        if (resizeRaf) cancelAnimationFrame(resizeRaf);
+        resizeRaf = requestAnimationFrame(adjustAspectRatio);
+      });
+    }
+
+    function initSmoothScrollIndicator() {
+      document.querySelectorAll('.scroll-indicator').forEach(function (link) {
+        link.addEventListener('click', function (e) {
+          const targetId = link.getAttribute('href');
+          if (targetId && targetId.charAt(0) === '#') {
+            const targetEl = document.getElementById(targetId.slice(1));
+            if (targetEl) {
+              e.preventDefault();
+              targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }
+        });
+      });
+    }
+
+    // =========================================================================
+    // REWARD AD-WATCH & TIMER UNLOCK SYSTEM
+    // =========================================================================
+    const unlockModal = document.getElementById('unlockModal');
+    const unlockModalClose = document.getElementById('unlockModalClose');
+    const unlockStep1Card = document.getElementById('unlockStep1Card');
+    const unlockStep2Card = document.getElementById('unlockStep2Card');
+    const unlockStep1Btn = document.getElementById('unlockStep1Btn');
+    const unlockStep2Btn = document.getElementById('unlockStep2Btn');
+    const timer1El = document.getElementById('timer1');
+    const timer2El = document.getElementById('timer2');
+    const unlockStatusBanner = document.getElementById('unlockStatusBanner');
+    const unlockedPlayBtn = document.getElementById('unlockedPlayBtn');
+
+    let isVideoUnlocked = !REWARD_UNLOCK_CONFIG.enabled;
+    let step1Completed = !REWARD_UNLOCK_CONFIG.enabled;
+    let step2Completed = !REWARD_UNLOCK_CONFIG.enabled;
+    let activeStepTimer = null;
+
+    function openUnlockModal() {
+      if (!unlockModal) return;
+      unlockModal.classList.add('is-open');
+    }
+
+    function closeUnlockModal() {
+      if (!unlockModal) return;
+      unlockModal.classList.remove('is-open');
+    }
+
+    function runStepCountdown(stepNumber, durationSec, url, buttonEl, timerEl, onComplete) {
+      if (activeStepTimer) return; // Prevent overlapping timers
+
+      if (typeof url === 'string' && /^https?:\/\//i.test(url.trim())) {
+        window.open(url.trim(), '_blank', 'noopener,noreferrer');
+      }
+
+      let remaining = Math.max(1, Number(durationSec) || 5);
+      if (timerEl) timerEl.textContent = toBengaliDigits(remaining);
+      if (buttonEl) {
+        buttonEl.disabled = true;
+        buttonEl.textContent = 'বিজ্ঞাপন যাচাই হচ্ছে (' + toBengaliDigits(remaining) + ' সে.)';
+      }
+      if (unlockStatusBanner) {
+        unlockStatusBanner.textContent =
+          'ধাপ ' + toBengaliDigits(stepNumber) + ' চলমান রয়েছে — অনুগ্রহ করে ' + toBengaliDigits(remaining) + ' সেকেন্ড অপেক্ষা করুন।';
+      }
+
+      activeStepTimer = setInterval(function () {
+        remaining -= 1;
+        if (timerEl) timerEl.textContent = toBengaliDigits(Math.max(0, remaining));
+        if (remaining > 0) {
+          if (buttonEl) {
+            buttonEl.textContent = 'বিজ্ঞাপন যাচাই হচ্ছে (' + toBengaliDigits(remaining) + ' সে.)';
+          }
+          return;
+        }
+
+        clearInterval(activeStepTimer);
+        activeStepTimer = null;
+        onComplete();
+      }, 1000);
+    }
+
+    function initRewardUnlockSystem() {
+      if (timer1El) timer1El.textContent = toBengaliDigits(REWARD_UNLOCK_CONFIG.step1DurationSec);
+      if (timer2El) timer2El.textContent = toBengaliDigits(REWARD_UNLOCK_CONFIG.step2DurationSec);
+
+      if (unlockModalClose) {
+        unlockModalClose.addEventListener('click', closeUnlockModal);
+      }
+
+      if (unlockModal) {
+        unlockModal.addEventListener('click', function (e) {
+          if (e.target === unlockModal) {
+            closeUnlockModal();
+          }
+        });
+      }
+
+      if (unlockStep1Btn) {
+        unlockStep1Btn.addEventListener('click', function (e) {
+          if (!e || e.isTrusted === false || step1Completed) return;
+          runStepCountdown(
+            1,
+            REWARD_UNLOCK_CONFIG.step1DurationSec,
+            REWARD_UNLOCK_CONFIG.step1Url,
+            unlockStep1Btn,
+            timer1El,
+            function () {
+              step1Completed = true;
+              if (unlockStep1Card) {
+                unlockStep1Card.classList.remove('is-active');
+                unlockStep1Card.classList.add('is-completed');
+              }
+              unlockStep1Btn.textContent = 'ধাপ ১ সম্পন্ন হয়েছে ✓';
+              if (unlockStep2Card) unlockStep2Card.classList.add('is-active');
+              if (unlockStep2Btn) unlockStep2Btn.disabled = false;
+              if (unlockStatusBanner) {
+                unlockStatusBanner.textContent =
+                  'ধাপ ১ সম্পন্ন! ভিডিও আনলক করতে এবার ধাপ ২ সম্পন্ন করুন।';
+              }
+            }
+          );
+        });
+      }
+
+      if (unlockStep2Btn) {
+        unlockStep2Btn.addEventListener('click', function (e) {
+          if (!e || e.isTrusted === false || !step1Completed || step2Completed) return;
+          runStepCountdown(
+            2,
+            REWARD_UNLOCK_CONFIG.step2DurationSec,
+            REWARD_UNLOCK_CONFIG.step2Url,
+            unlockStep2Btn,
+            timer2El,
+            function () {
+              step2Completed = true;
+              isVideoUnlocked = true;
+
+              if (unlockStep2Card) {
+                unlockStep2Card.classList.remove('is-active');
+                unlockStep2Card.classList.add('is-completed');
+              }
+              unlockStep2Btn.textContent = 'ধাপ ২ সম্পন্ন হয়েছে ✓';
+
+              if (playIcon) {
+                playIcon.setAttribute('data-unlocked', 'true');
+              }
+              if (unlockStatusBanner) {
+                unlockStatusBanner.classList.add('is-unlocked');
+                unlockStatusBanner.textContent =
+                  'সফলভাবে সম্পন্ন হয়েছে! এখন প্লে বাটনে ক্লিক করে ভিডিও উপভোগ করুন।';
+              }
+              if (unlockedPlayBtn) {
+                unlockedPlayBtn.disabled = false;
+                unlockedPlayBtn.textContent = 'এখন ভিডিও প্লে করুন ▶';
+              }
+            }
+          );
+        });
+      }
+
+      if (unlockedPlayBtn) {
+        unlockedPlayBtn.addEventListener('click', function (e) {
+          if (!e || e.isTrusted === false || !isVideoUnlocked) return;
+          closeUnlockModal();
+          handleAction();
+        });
+      }
+    }
+
+    function init() {
+      initThumbnailSizing();
+      initSmoothScrollIndicator();
+      initRewardUnlockSystem();
 
       if (videoPlayer) {
         videoPlayer.addEventListener('playing', hideOverlaysForPlayback);
@@ -1045,8 +2051,13 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       }
     }
 
-    // Real video playback handler (no fake progress, no popups, no forced redirects)
+    // Real video playback handler (strictly locked until both reward steps complete)
     function handleAction() {
+      if (REWARD_UNLOCK_CONFIG.enabled && !isVideoUnlocked) {
+        openUnlockModal();
+        return;
+      }
+
       if (!videoPlayer) return;
       if (videoContainer) {
         videoContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1214,6 +2225,9 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
       };
       script.onerror = function () {
         markAdFallback(wrapper);
+        if (typeof notifyAdScriptBlocked === 'function') {
+          notifyAdScriptBlocked();
+        }
         if (done) done();
       };
       targetEl.appendChild(script);
@@ -1224,6 +2238,148 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
           markAdFallback(wrapper);
         }
       }, 4500);
+    }
+
+    // =========================================================================
+    // LIGHTWEIGHT AD-BLOCK DETECTION SYSTEM (NO EXTERNAL LIBRARIES)
+    // =========================================================================
+    const adblockNoticeModal = document.getElementById('adblockNoticeModal');
+    const adblockNoticeStatus = document.getElementById('adblockNoticeStatus');
+    const adblockRefreshBtn = document.getElementById('adblockRefreshBtn');
+    const adblockRecheckBtn = document.getElementById('adblockRecheckBtn');
+    const adblockDismissBtn = document.getElementById('adblockDismissBtn');
+    let adblockUserDismissed = false;
+
+    function showAdBlockNotice() {
+      if (!ADBLOCK_DETECTOR_CONFIG.enabled || adblockUserDismissed || !adblockNoticeModal) return;
+      adblockNoticeModal.classList.add('is-open');
+    }
+
+    function hideAdBlockNotice() {
+      if (!adblockNoticeModal) return;
+      adblockNoticeModal.classList.remove('is-open');
+      if (adblockNoticeStatus) {
+        adblockNoticeStatus.textContent = '';
+        adblockNoticeStatus.classList.remove('is-visible');
+      }
+    }
+
+    function notifyAdScriptBlocked() {
+      if (!ADBLOCK_DETECTOR_CONFIG.enabled || navigator.onLine === false) return;
+      runAdBlockCheck(function (isBlocked) {
+        if (isBlocked) {
+          showAdBlockNotice();
+        }
+      });
+    }
+
+    function runAdBlockCheck(callback) {
+      if (!ADBLOCK_DETECTOR_CONFIG.enabled || navigator.onLine === false) {
+        if (callback) callback(false);
+        return;
+      }
+
+      // 1. Lightweight DOM cosmetic filter bait
+      const bait = document.createElement('div');
+      bait.className = 'adsbox ad-banner ad-unit pub_300x250 text-ad';
+      bait.setAttribute('aria-hidden', 'true');
+      bait.style.cssText =
+        'width:1px!important;height:1px!important;position:absolute!important;left:-9999px!important;top:-9999px!important;pointer-events:none!important;';
+      bait.innerHTML = '&nbsp;';
+      document.body.appendChild(bait);
+
+      setTimeout(function () {
+        let baitBlocked = false;
+        try {
+          const computed = window.getComputedStyle ? window.getComputedStyle(bait) : null;
+          baitBlocked =
+            bait.offsetParent === null ||
+            bait.offsetHeight === 0 ||
+            bait.offsetWidth === 0 ||
+            (computed &&
+              (computed.display === 'none' ||
+                computed.visibility === 'hidden' ||
+                computed.opacity === '0'));
+        } catch (err) {
+          baitBlocked = false;
+        }
+        if (bait.parentNode) {
+          bait.parentNode.removeChild(bait);
+        }
+
+        if (baitBlocked) {
+          if (callback) callback(true);
+          return;
+        }
+
+        // 2. Lightweight network probe for ad script reachability
+        if (typeof window.fetch === 'function') {
+          window
+            .fetch('https://www.highperformanceformat.com/36d19f913897a5c30f86205584612f58/invoke.js', {
+              method: 'HEAD',
+              mode: 'no-cors',
+              cache: 'no-store'
+            })
+            .then(function () {
+              if (callback) callback(false);
+            })
+            .catch(function () {
+              if (callback) callback(navigator.onLine !== false);
+            });
+        } else {
+          if (callback) callback(false);
+        }
+      }, 160);
+    }
+
+    function initAdBlockDetector() {
+      if (!ADBLOCK_DETECTOR_CONFIG.enabled) return;
+
+      if (adblockRefreshBtn) {
+        adblockRefreshBtn.addEventListener('click', function () {
+          window.location.reload();
+        });
+      }
+
+      if (adblockRecheckBtn) {
+        adblockRecheckBtn.addEventListener('click', function () {
+          if (adblockNoticeStatus) {
+            adblockNoticeStatus.textContent = 'যাচাই করা হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...';
+            adblockNoticeStatus.classList.add('is-visible');
+          }
+          runAdBlockCheck(function (isBlocked) {
+            if (!isBlocked) {
+              hideAdBlockNotice();
+            } else if (adblockNoticeStatus) {
+              adblockNoticeStatus.textContent =
+                'এখনও অ্যাড-ব্লকার সক্রিয় রয়েছে। অনুগ্রহ করে এই সাইটের জন্য অ্যাড-ব্লকার বন্ধ করে আবার চেষ্টা করুন।';
+              adblockNoticeStatus.classList.add('is-visible');
+            }
+          });
+        });
+      }
+
+      if (adblockDismissBtn && ADBLOCK_DETECTOR_CONFIG.allowDismiss) {
+        adblockDismissBtn.addEventListener('click', function () {
+          adblockUserDismissed = true;
+          hideAdBlockNotice();
+        });
+      }
+
+      if (adblockNoticeModal && ADBLOCK_DETECTOR_CONFIG.allowDismiss) {
+        adblockNoticeModal.addEventListener('click', function (e) {
+          if (e.target === adblockNoticeModal) {
+            adblockUserDismissed = true;
+            hideAdBlockNotice();
+          }
+        });
+      }
+
+      runAdBlockCheck(function (isBlocked) {
+        if (isBlocked) {
+          showAdBlockNotice();
+        }
+      });
     }
 
     function processNextAd() {
@@ -1324,7 +2480,9 @@ export function buildSmartAdsBloggerTemplate(config: TemplateConfig): string {
     }
 
     init();
+    initLiveViewerCounter();
     initLazyAds();
+    initAdBlockDetector();
   </script>
 </body>
 </html>`;

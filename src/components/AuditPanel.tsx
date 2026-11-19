@@ -72,6 +72,26 @@ const CORE_GUARDS = [
     status: 'Trusted-click check (isTrusted) + per-button cooldownMs debounce + .is-cooldown',
   },
   {
+    item: 'Live Viewer Badge',
+    status: 'Random range 1577 - 5285 over video player with smooth fade-in/out updates',
+  },
+  {
+    item: 'Dynamic Image Sizing',
+    status: 'Auto naturalWidth/naturalHeight sizing for JPG, JPEG, PNG & WebP (16:9, 9:16, 1:1, 4:3, 2:3, custom)',
+  },
+  {
+    item: '2-Step Reward Ad Unlock',
+    status: 'Play stays locked until sequential Step 1 & Step 2 Bengali countdown timers finish',
+  },
+  {
+    item: 'SEO Meta Tags',
+    status: 'Conditional <meta name="description"> & <link rel="canonical"> injected safely in <head>',
+  },
+  {
+    item: 'Ad-Block Detection',
+    status: 'Zero-dependency cosmetic bait + script probe with polite Bengali disable notice',
+  },
+  {
     item: 'Preserved IDs & Tokens',
     status: '#videoThumbnail, #playIcon, #loadingScreen, #btn1-#btn3, {{TITLE}}, {{IMAGE_URL}}, {{CAPTION}}',
   },

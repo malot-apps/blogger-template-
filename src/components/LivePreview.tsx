@@ -3,6 +3,7 @@ import { ArrowDown, Play, Tv } from 'lucide-react';
 import {
   ButtonId,
   DEFAULT_BUTTON_SETTINGS,
+  isSupportedImageUrl,
   TemplateConfig,
 } from '../template/bloggerTemplate';
 
@@ -11,7 +12,9 @@ interface LivePreviewProps {
   viewport: 'desktop' | 'mobile';
   forceLoading: boolean;
   simulateFallback: boolean;
+  simulateAdBlock: boolean;
   simulatePlaybackError: boolean;
+  onCloseAdBlockTest: () => void;
   onImageMetrics: (metrics: { width: number; height: number; ratioText: string; mode: string }) => void;
   onActionTriggered: (source: string) => void;
 }
@@ -71,21 +74,43 @@ const AdSlotPreview: React.FC<{
   );
 };
 
+const toBengaliDigits = (val: string | number): string =>
+  String(val).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]);
+
 export const LivePreview: React.FC<LivePreviewProps> = ({
   config,
   viewport,
   forceLoading,
   simulateFallback,
+  simulateAdBlock,
   simulatePlaybackError,
+  onCloseAdBlockTest,
   onImageMetrics,
   onActionTriggered,
 }) => {
+  const rewardEnabled = config.rewardUnlock?.enabled ?? true;
+  const adBlockEnabled = config.adBlockDetector?.enabled ?? true;
+  const adBlockDismissible = config.adBlockDetector?.allowDismiss ?? false;
+  const [adBlockRecheckMsg, setAdBlockRecheckMsg] = useState<string>('');
+  const step1Duration = Math.max(1, Math.round(config.rewardUnlock?.step1DurationSec ?? 5));
+  const step2Duration = Math.max(1, Math.round(config.rewardUnlock?.step2DurationSec ?? 5));
+
   const [ratioCss, setRatioCss] = useState<string>('16 / 9');
-  const [orientation, setOrientation] = useState<'landscape' | 'portrait' | 'square'>('landscape');
+  const [containerMaxWidth, setContainerMaxWidth] = useState<string>('100%');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [failureCount, setFailureCount] = useState<number>(0);
   const [imgError, setImgError] = useState<boolean>(false);
+  const [viewerCount, setViewerCount] = useState<number>(() =>
+    Math.floor(Math.random() * (5285 - 1577 + 1)) + 1577
+  );
+  const [viewerUpdating, setViewerUpdating] = useState<boolean>(false);
+  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const [step1Done, setStep1Done] = useState<boolean>(!rewardEnabled);
+  const [step2Done, setStep2Done] = useState<boolean>(!rewardEnabled);
+  const [activeCountingStep, setActiveCountingStep] = useState<1 | 2 | null>(null);
+  const [step1Remaining, setStep1Remaining] = useState<number>(step1Duration);
+  const [step2Remaining, setStep2Remaining] = useState<number>(step2Duration);
   const [cooldownButtons, setCooldownButtons] = useState<Record<ButtonId, boolean>>({
     btn1: false,
     btn2: false,
@@ -94,6 +119,7 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
   const imgRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const loadingTimerRef = useRef<number | null>(null);
+  const stepTimerRef = useRef<number | null>(null);
   const lastClickAtRef = useRef<Record<ButtonId, number>>({
     btn1: 0,
     btn2: 0,
@@ -106,7 +132,66 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
   });
 
   useEffect(() => {
+    if (stepTimerRef.current) {
+      window.clearInterval(stepTimerRef.current);
+      stepTimerRef.current = null;
+    }
+    setActiveCountingStep(null);
+    setStep1Done(!rewardEnabled);
+    setStep2Done(!rewardEnabled);
+    setStep1Remaining(step1Duration);
+    setStep2Remaining(step2Duration);
+    if (!rewardEnabled) setModalOpen(false);
+  }, [rewardEnabled, step1Duration, step2Duration]);
+
+  useEffect(() => {
+    let active = true;
+    let scheduleTimer: number | null = null;
+    let swapTimer: number | null = null;
+
+    const queueNext = () => {
+      const delay = 3200 + Math.floor(Math.random() * 2600);
+      scheduleTimer = window.setTimeout(() => {
+        if (!active) return;
+        setViewerUpdating(true);
+        swapTimer = window.setTimeout(() => {
+          if (!active) return;
+          setViewerCount((prev) => {
+            const delta = Math.floor(Math.random() * 141) - 70;
+            const next = prev + delta;
+            if (next < 1577 || next > 5285 || next === prev) {
+              return Math.floor(Math.random() * (5285 - 1577 + 1)) + 1577;
+            }
+            return next;
+          });
+          setViewerUpdating(false);
+          queueNext();
+        }, 260);
+      }, delay);
+    };
+
+    queueNext();
+    return () => {
+      active = false;
+      if (scheduleTimer) window.clearTimeout(scheduleTimer);
+      if (swapTimer) window.clearTimeout(swapTimer);
+    };
+  }, []);
+
+  useEffect(() => {
     setImgError(false);
+    setRatioCss('16 / 9');
+    setContainerMaxWidth('100%');
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 820;
+      const maxComfortableHeight = Math.max(340, Math.min(680, Math.round(viewportHeight * 0.78)));
+      const targetWidth = Math.min(w, Math.round(maxComfortableHeight * (w / h)));
+      setRatioCss(`${w} / ${h}`);
+      setContainerMaxWidth(`${targetWidth}px`);
+    }
   }, [config.imageUrl]);
 
   useEffect(() => {
@@ -116,9 +201,31 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
   }, [config.videoUrl, simulatePlaybackError]);
 
   useEffect(() => {
+    setAdBlockRecheckMsg('');
+  }, [simulateAdBlock]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const img = imgRef.current;
+      if (!img || !img.naturalWidth || !img.naturalHeight) return;
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 820;
+      const maxComfortableHeight = Math.max(340, Math.min(680, Math.round(viewportHeight * 0.78)));
+      const targetWidth = Math.min(w, Math.round(maxComfortableHeight * (w / h)));
+      setContainerMaxWidth(`${targetWidth}px`);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (loadingTimerRef.current) {
         window.clearTimeout(loadingTimerRef.current);
+      }
+      if (stepTimerRef.current) {
+        window.clearInterval(stepTimerRef.current);
       }
       (['btn1', 'btn2', 'btn3'] as ButtonId[]).forEach((id) => {
         const timer = cooldownTimersRef.current[id];
@@ -127,14 +234,53 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
     };
   }, []);
 
+  const isUnlocked = !rewardEnabled || (step1Done && step2Done);
+
+  const startUnlockStep = (step: 1 | 2) => {
+    if (activeCountingStep !== null) return;
+    if (step === 1 && step1Done) return;
+    if (step === 2 && (!step1Done || step2Done)) return;
+
+    const adUrl =
+      step === 1 ? config.rewardUnlock?.step1Url || '' : config.rewardUnlock?.step2Url || '';
+    onActionTriggered(
+      `Unlock Step ${step}: simulated ad tab (${adUrl || 'timer only'}) & countdown started.`
+    );
+
+    setActiveCountingStep(step);
+    let remaining = step === 1 ? step1Duration : step2Duration;
+
+    stepTimerRef.current = window.setInterval(() => {
+      remaining -= 1;
+      if (step === 1) {
+        setStep1Remaining(Math.max(0, remaining));
+      } else {
+        setStep2Remaining(Math.max(0, remaining));
+      }
+
+      if (remaining <= 0) {
+        if (stepTimerRef.current) {
+          window.clearInterval(stepTimerRef.current);
+          stepTimerRef.current = null;
+        }
+        setActiveCountingStep(null);
+        if (step === 1) setStep1Done(true);
+        if (step === 2) setStep2Done(true);
+      }
+    }, 1000);
+  };
+
   const syncImageDimensions = () => {
     const img = imgRef.current;
     if (!img || !img.naturalWidth || !img.naturalHeight) return;
     const w = img.naturalWidth;
     const h = img.naturalHeight;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 820;
+    const maxComfortableHeight = Math.max(340, Math.min(680, Math.round(viewportHeight * 0.78)));
+    const targetWidth = Math.min(w, Math.round(maxComfortableHeight * (w / h)));
     setRatioCss(`${w} / ${h}`);
+    setContainerMaxWidth(`${targetWidth}px`);
     const mode = h > w ? 'portrait' : w === h ? 'square' : 'landscape';
-    setOrientation(mode);
     const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
     const divisor = gcd(w, h);
     onImageMetrics({
@@ -146,6 +292,14 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
   };
 
   const triggerPlayback = (source: string) => {
+    if (!isUnlocked) {
+      setModalOpen(true);
+      onActionTriggered(
+        `Player locked: complete 2 sequential ad-watch steps before playback (${source}).`
+      );
+      return;
+    }
+
     onActionTriggered(source);
     if (loadingTimerRef.current) {
       window.clearTimeout(loadingTimerRef.current);
@@ -237,6 +391,9 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
     config.caption === '{{CAPTION}}'
       ? 'Watch the complete uncut golden-hour coastal drive in crisp 1080p HD'
       : config.caption;
+  const hasValidThumbnail =
+    Boolean(config.imageUrl) &&
+    (config.imageUrl === '{{IMAGE_URL}}' || isSupportedImageUrl(config.imageUrl));
 
   return (
     <div className="w-full flex justify-center">
@@ -275,12 +432,18 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
 
           {/* Blogger Thumbnail Separator */}
           <div className="my-4 text-center">
-            <img
-              src={config.imageUrl}
-              alt={displayTitle}
-              referrerPolicy="no-referrer"
-              className="max-w-full max-h-[240px] mx-auto rounded-[10px] shadow-md object-contain"
-            />
+            {hasValidThumbnail && !imgError ? (
+              <img
+                src={config.imageUrl}
+                alt={displayTitle}
+                referrerPolicy="no-referrer"
+                className="max-w-full max-h-[240px] mx-auto rounded-[10px] shadow-md object-contain"
+              />
+            ) : (
+              <div className="max-w-md mx-auto py-4 px-4 rounded-[10px] border border-dashed border-slate-300 bg-slate-50 text-xs text-slate-500">
+                Thumbnail preview unavailable
+              </div>
+            )}
             <p className="mt-2 text-sm text-slate-600">{displayCaption}</p>
           </div>
 
@@ -311,31 +474,46 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
             onClick={() => {
               if (!isPlaying) triggerPlayback('Player Frame');
             }}
-            style={{ aspectRatio: ratioCss }}
-            className={`relative w-full my-3 mx-auto bg-black rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.22)] overflow-hidden cursor-pointer select-none group ${
-              orientation === 'portrait'
-                ? 'max-w-[420px]'
-                : orientation === 'square'
-                ? 'max-w-[560px]'
-                : 'max-w-full'
-            }`}
+            style={{ aspectRatio: ratioCss, maxWidth: `min(100%, ${containerMaxWidth})` }}
+            className="relative w-full my-3 mx-auto bg-black rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.22)] overflow-hidden cursor-pointer select-none group"
           >
+            {/* Live Random Viewer Badge (1577 - 5285) */}
+            <div className="absolute top-3 left-3 z-[25] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/75 backdrop-blur-md border border-white/20 text-white text-xs font-semibold shadow-md pointer-events-none select-none">
+              <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.85)] animate-pulse" />
+              <span
+                className={`tabular-nums transition-all duration-300 ${
+                  viewerUpdating ? 'opacity-0 -translate-y-0.5' : 'opacity-100 translate-y-0'
+                }`}
+              >
+                {toBengaliDigits(viewerCount.toLocaleString('en-US'))}
+              </span>
+              <span>জন দেখছেন</span>
+            </div>
+
             {!isPlaying && (
               <>
-                {!imgError ? (
+                {hasValidThumbnail && !imgError ? (
                   <img
                     ref={imgRef}
                     src={config.imageUrl}
                     alt={displayTitle}
                     referrerPolicy="no-referrer"
                     onLoad={syncImageDimensions}
-                    onError={() => setImgError(true)}
-                    className="w-full h-full object-contain block transition-transform duration-500 group-hover:scale-[1.025]"
+                    onError={() => {
+                      setImgError(true);
+                      setRatioCss('16 / 9');
+                      setContainerMaxWidth('100%');
+                    }}
+                    className="w-full h-full object-contain object-center block"
                   />
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center gap-2 p-6 text-center bg-slate-900 text-slate-300">
                     <Tv className="w-8 h-8 text-slate-400" />
-                    <span className="text-sm font-medium">Unable to load custom image URL</span>
+                    <span className="text-sm font-medium">
+                      {hasValidThumbnail
+                        ? 'Unable to load thumbnail image'
+                        : 'Enter a valid image URL (JPG, JPEG, PNG, or WebP)'}
+                    </span>
                   </div>
                 )}
 
@@ -357,14 +535,14 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
                 setIsPlaying(false);
                 setFailureCount((prev) => prev + 1);
               }}
-              className={`absolute inset-0 w-full h-full bg-black z-20 ${
+              className={`absolute inset-0 w-full h-full object-contain bg-black z-20 ${
                 isPlaying ? 'block' : 'hidden'
               }`}
             />
 
             {/* Centered Play Button + Bengali Instruction Below */}
             {!showLoader && !showErrorOverlay && !isPlaying && (
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[46%] flex flex-col items-center gap-3.5 z-20 w-[min(90%,340px)] pointer-events-none">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center z-20 pointer-events-none">
                 <button
                   type="button"
                   aria-label="ভিডিও চালু করুন"
@@ -381,8 +559,16 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
                     className="absolute top-1/2 left-1/2 w-[calc(100%+20px)] h-[calc(100%+20px)] rounded-full border-2 border-white/75 shadow-[0_0_20px_rgba(110,142,251,0.55)] preview-play-ring pointer-events-none"
                   />
                   <Play className={`${isMobile ? 'w-6 h-6' : 'w-7 h-7'} fill-current ml-1`} />
+                  {!isUnlocked && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -bottom-1.5 -right-1.5 w-6 h-6 rounded-full bg-slate-900 border-2 border-white text-[11px] flex items-center justify-center shadow"
+                    >
+                      🔒
+                    </span>
+                  )}
                 </button>
-                <div className="px-3.5 py-1.5 rounded-full bg-slate-900/75 backdrop-blur-md border border-white/20 text-white text-xs font-semibold text-center shadow-lg">
+                <div className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 w-max max-w-[min(82vw,290px)] px-3.5 py-1.5 rounded-full bg-slate-900/75 backdrop-blur-md border border-white/20 text-white text-xs font-semibold text-center shadow-lg">
                   ভিডিও চালু করতে উপরের প্লে বাটনে চাপ দিন
                 </div>
               </div>
@@ -587,6 +773,203 @@ export const LivePreview: React.FC<LivePreviewProps> = ({
           />
         </div>
       </div>
+
+      {/* Reward Ad-Watch & Timer Unlock Preview Modal */}
+      {modalOpen && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div className="relative w-full max-w-[440px] bg-white border border-slate-200 rounded-2xl p-5 shadow-2xl space-y-4">
+            <button
+              type="button"
+              onClick={() => setModalOpen(false)}
+              aria-label="বন্ধ করুন"
+              className="absolute top-3.5 right-3.5 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-base flex items-center justify-center cursor-pointer"
+            >
+              ×
+            </button>
+
+            <div className="pr-8">
+              <span className="inline-block px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-bold mb-1.5">
+                নিরাপদ ভিডিও আনলক
+              </span>
+              <h3 className="text-base font-bold text-slate-900 leading-snug">
+                ভিডিওটি আনলক করতে নিচের নিয়মগুলো অনুসরণ করুন:
+              </h3>
+            </div>
+
+            <div className="space-y-3">
+              <div
+                className={`p-3.5 rounded-xl border ${
+                  step1Done
+                    ? 'border-emerald-500 bg-emerald-50'
+                    : 'border-indigo-400 bg-indigo-50/50'
+                }`}
+              >
+                <p className="text-xs font-semibold text-slate-800 mb-2.5 leading-relaxed">
+                  ধাপ ১: প্রথম বিজ্ঞাপনটি সম্পূর্ণ দেখুন (অবশিষ্ট সময়:{' '}
+                  <span className="font-bold text-indigo-700">
+                    {toBengaliDigits(step1Remaining)}
+                  </span>{' '}
+                  সেকেন্ড)
+                </p>
+                <button
+                  type="button"
+                  disabled={step1Done || activeCountingStep !== null}
+                  onClick={() => startUnlockStep(1)}
+                  className={`w-full py-2.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    step1Done
+                      ? 'bg-emerald-600 text-white cursor-default'
+                      : activeCountingStep === 1
+                      ? 'bg-slate-300 text-slate-600 cursor-not-allowed'
+                      : 'bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white shadow'
+                  }`}
+                >
+                  {step1Done
+                    ? 'ধাপ ১ সম্পন্ন হয়েছে ✓'
+                    : activeCountingStep === 1
+                    ? `বিজ্ঞাপন যাচাই হচ্ছে (${toBengaliDigits(step1Remaining)} সে.)`
+                    : 'বিজ্ঞাপন ১ দেখুন'}
+                </button>
+              </div>
+
+              <div
+                className={`p-3.5 rounded-xl border ${
+                  step2Done
+                    ? 'border-emerald-500 bg-emerald-50'
+                    : step1Done
+                    ? 'border-indigo-400 bg-indigo-50/50'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <p className="text-xs font-semibold text-slate-800 mb-2.5 leading-relaxed">
+                  ধাপ ২: দ্বিতীয় বিজ্ঞাপনটি সম্পন্ন করুন (অবশিষ্ট সময়:{' '}
+                  <span className="font-bold text-indigo-700">
+                    {toBengaliDigits(step2Remaining)}
+                  </span>{' '}
+                  সেকেন্ড)
+                </p>
+                <button
+                  type="button"
+                  disabled={!step1Done || step2Done || activeCountingStep !== null}
+                  onClick={() => startUnlockStep(2)}
+                  className={`w-full py-2.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    step2Done
+                      ? 'bg-emerald-600 text-white cursor-default'
+                      : !step1Done || activeCountingStep === 2
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      : 'bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white shadow'
+                  }`}
+                >
+                  {step2Done
+                    ? 'ধাপ ২ সম্পন্ন হয়েছে ✓'
+                    : activeCountingStep === 2
+                    ? `বিজ্ঞাপন যাচাই হচ্ছে (${toBengaliDigits(step2Remaining)} সে.)`
+                    : 'বিজ্ঞাপন ২ দেখুন'}
+                </button>
+              </div>
+            </div>
+
+            <div
+              className={`p-3 rounded-xl border text-xs font-semibold text-center leading-relaxed ${
+                isUnlocked
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                  : 'bg-amber-50 border-amber-200 text-amber-800'
+              }`}
+            >
+              {isUnlocked
+                ? 'সফলভাবে সম্পন্ন হয়েছে! এখন প্লে বাটনে ক্লিক করে ভিডিও উপভোগ করুন।'
+                : step1Done
+                ? 'ধাপ ১ সম্পন্ন! ভিডিও আনলক করতে এবার ধাপ ২ সম্পন্ন করুন।'
+                : 'উভয় ধাপ সম্পন্ন না হওয়া পর্যন্ত প্লে বাটনটি লক থাকবে।'}
+            </div>
+
+            <button
+              type="button"
+              disabled={!isUnlocked}
+              onClick={() => {
+                setModalOpen(false);
+                triggerPlayback('Unlocked Play Button');
+              }}
+              className={`w-full py-2.5 px-5 rounded-full text-sm font-bold transition-all cursor-pointer ${
+                isUnlocked
+                  ? 'bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white shadow-md hover:-translate-y-0.5'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              {isUnlocked ? 'এখন ভিডিও প্লে করুন ▶' : 'ভিডিও আনলক করতে ধাপ ২টি সম্পন্ন করুন'}
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Polite Bengali Ad-Blocker Notice Preview */}
+      {simulateAdBlock && adBlockEnabled && (
+        <div
+          onClick={(e) => {
+            if (adBlockDismissible && e.target === e.currentTarget) {
+              onCloseAdBlockTest();
+            }
+          }}
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div className="w-full max-w-[440px] bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl space-y-3.5 text-slate-800">
+            <span className="inline-block px-2.5 py-1 rounded-full bg-orange-50 border border-orange-200 text-orange-700 text-[11px] font-bold">
+              বিনীত অনুরোধ · অ্যাড-ব্লকার শনাক্ত
+            </span>
+            <h3 className="text-lg font-bold text-slate-900 leading-snug">
+              দয়া করে আপনার অ্যাড-ব্লকার বন্ধ করুন
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+              আমাদের সাইটের সমস্ত ভিডিও এবং কনটেন্ট সম্পূর্ণ বিনামূল্যে সবার জন্য উন্মুক্ত রাখতে বিজ্ঞাপনই একমাত্র সহায়ক। কনটেন্টটি দেখতে অনুগ্রহ করে এই পেজের জন্য আপনার অ্যাড-ব্লকারটি সাময়িকভাবে বন্ধ করে পেজটি রিফ্রেশ করুন।
+            </p>
+            <ol className="list-decimal pl-5 py-3 pr-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1 leading-relaxed">
+              <li>আপনার ব্রাউজারের অ্যাড-ব্লকার এক্সটেনশন আইকনে ক্লিক করুন।</li>
+              <li>এই ওয়েবসাইটের জন্য অ্যাড-ব্লকারটি বন্ধ বা পজ (Pause / Whitelist) করুন।</li>
+              <li>নিচের বাটনে ক্লিক করে পেজটি রিফ্রেশ করুন।</li>
+            </ol>
+            {adBlockRecheckMsg && (
+              <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs font-semibold text-center">
+                {adBlockRecheckMsg}
+              </div>
+            )}
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onCloseAdBlockTest();
+                  onActionTriggered('Ad-Block Notice: simulated page refresh after disabling ad-blocker.');
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-br from-[#6e8efb] to-[#a777e3] text-white text-sm font-bold shadow cursor-pointer"
+              >
+                আমি বন্ধ করেছি, পেজ রিফ্রেশ করুন
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setAdBlockRecheckMsg(
+                    'এখনও অ্যাড-ব্লকার সক্রিয় রয়েছে। অনুগ্রহ করে এই সাইটের জন্য অ্যাড-ব্লকার বন্ধ করে আবার চেষ্টা করুন।'
+                  )
+                }
+                className="w-full py-2 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 text-xs font-bold cursor-pointer"
+              >
+                পুনরায় যাচাই করুন
+              </button>
+              {adBlockDismissible && (
+                <button
+                  type="button"
+                  onClick={onCloseAdBlockTest}
+                  className="w-full py-2 px-4 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-50 text-xs font-semibold cursor-pointer"
+                >
+                  আপাতত বন্ধ রাখুন
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
